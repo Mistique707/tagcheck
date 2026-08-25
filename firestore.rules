@@ -1,0 +1,114 @@
+rules_version = '2';
+
+// TagCheck security rules.
+//
+// These rules are the whole security model in the Firebase setup: there is no
+// server to check anything, so what is written here is what is enforced.
+//
+// The important one is on /tags: create is allowed, update never is. Because a
+// tag document is keyed by the plate itself, a second person tagging the same
+// bike is attempting an update, and Firestore refuses it. That is the same
+// guarantee the self-hosted version gets from a unique index, and it holds even
+// when two phones write in the same instant.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function memberPath() {
+      return /databases/$(database)/documents/members/$(request.auth.uid);
+    }
+
+    function isMember() {
+      return signedIn() && exists(memberPath());
+    }
+
+    function isAdmin() {
+      return isMember() && get(memberPath()).data.admin == true;
+    }
+
+    // Readable by the rules engine even though no client may read it.
+    function secrets() {
+      return get(/databases/$(database)/documents/config/secrets).data;
+    }
+
+    function knownCode(code) {
+      return code == secrets().joinCode || code == secrets().adminCode;
+    }
+
+    // The club name, shown before anyone signs in.
+    match /config/public {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // The join and admin codes. No client may read these; only the rules above
+    // consult them. Change them from the Firebase console.
+    match /config/secrets {
+      allow read, write: if false;
+    }
+
+    match /members/{uid} {
+      // Your own record, and admins can see everyone.
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 2
+        && request.resource.data.name.size() <= 40
+        && knownCode(request.resource.data.code)
+        // Admin is granted only by presenting the admin code.
+        && (request.resource.data.admin == false
+            || request.resource.data.code == secrets().adminCode);
+
+      // A member may correct their own name, but cannot promote themselves.
+      allow update: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.admin == resource.data.admin
+        && request.resource.data.code == resource.data.code
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 2
+        && request.resource.data.name.size() <= 40;
+
+      allow delete: if false;
+    }
+
+    match /tags/{plateId} {
+      allow read: if isMember();
+
+      allow create: if isMember()
+        // The document id is the canonical plate, which is what makes a
+        // duplicate tag an update, and updates are refused below.
+        && request.resource.data.plate == plateId
+        && request.resource.data.memberUid == request.auth.uid
+        && request.resource.data.memberName is string
+        && request.resource.data.memberName.size() <= 40
+        && request.resource.data.fuzzy is string
+        && request.resource.data.format is string
+        && request.resource.data.createdAt == request.time
+        && (!('note' in request.resource.data)
+            || (request.resource.data.note is string
+                && request.resource.data.note.size() <= 280));
+
+      // A tag is a record of something that happened. It is never edited.
+      allow update: if false;
+
+      // Removing a tag frees the bike to be tagged again, so it is limited to
+      // the member who made it (for a day) or an admin.
+      allow delete: if isMember() && (
+        isAdmin()
+        || (resource.data.memberUid == request.auth.uid
+            && request.time < resource.data.createdAt + duration.value(24, 'h'))
+      );
+    }
+
+    // Anything not named above is closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

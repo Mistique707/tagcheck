@@ -6,7 +6,7 @@
  * its own mirror in IndexedDB, which is the copy it can reason about.
  */
 
-const VERSION = 'tagcheck-v1.0.0';
+const VERSION = 'tagcheck-v1.1.0';
 
 /** Resolved against the worker location so a subpath deployment still works. */
 const SHELL = [
@@ -18,6 +18,10 @@ const SHELL = [
   './store.js',
   './ocr.js',
   './config.js',
+  './backend.js',
+  './backend-rest.js',
+  './backend-firebase.js',
+  './firebase-config.js',
   './shared/plate.js',
   './manifest.webmanifest',
   './icons/icon-192.png',

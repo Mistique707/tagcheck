@@ -47,3 +47,27 @@ jobs:
           curl -sf http://127.0.0.1:3000/api/health
           curl -sf http://127.0.0.1:3000/ > /dev/null
           curl -sf http://127.0.0.1:3000/shared/plate.js > /dev/null
+
+  # In the serverless setup these rules are the only thing standing between a
+  # phone and the club records, so they are tested against the real emulator
+  # rather than reviewed by eye.
+  rules:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24.x'
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - run: npm ci
+
+      - name: Test Firestore security rules
+        run: npm run test:rules

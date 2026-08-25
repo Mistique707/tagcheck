@@ -37,18 +37,12 @@ jobs:
       - name: Assemble the site
         run: |
           npm run icons
-          mkdir -p site
-          cp -r web/. site/
-          # The browser imports the same normaliser the server uses.
-          mkdir -p site/shared
-          cp shared/plate.js site/shared/plate.js
-          # Pages serves this as a static site; no Jekyll processing wanted.
-          touch site/.nojekyll
+          npm run build:web
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: public
 
       - id: deployment
         uses: actions/deploy-pages@v4

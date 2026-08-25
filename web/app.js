@@ -5,17 +5,14 @@
  * they have seen an answer about that bike. Everything else -- the camera, the
  * offline mirror, the queue -- exists to make that answer arrive fast enough to
  * be useful while standing next to a parked motorcycle.
+ *
+ * Where the records live is decided in backend.js, and nothing here needs to
+ * know which one was chosen.
  */
 
 import { bestReading, formatPlate, normalizePlate } from './shared/plate.js';
 import { SYNC_INTERVAL_MS } from './config.js';
-import {
-  ApiError, OfflineError, api, apiUrl, session,
-} from './api.js';
-import {
-  applyPlates, clearPlates, forgetLocalTag, getMeta, localPlate, localSimilar,
-  queueAdd, queueAll, queueCount, queueRemove, rememberLocalTag, setMeta,
-} from './store.js';
+import { getBackend } from './backend.js';
 import { canvasFromImage, cropGuideRegion, readPlate, releaseEngine } from './ocr.js';
 
 const $ = (id) => document.getElementById(id);
@@ -28,16 +25,13 @@ const el = {
   name: $('input-name'),
   code: $('input-code'),
   server: $('input-server'),
+  serverRow: document.querySelector('.advanced'),
   clubName: $('club-name'),
   topbarClub: $('topbar-club'),
   netChip: $('net-chip'),
   menuBtn: $('btn-menu'),
   menu: $('menu'),
-  panels: {
-    scan: $('panel-scan'),
-    feed: $('panel-feed'),
-    stats: $('panel-stats'),
-  },
+  panels: { scan: $('panel-scan'), feed: $('panel-feed'), stats: $('panel-stats') },
   cameraWrap: $('camera-wrap'),
   video: $('video'),
   cameraFallback: $('camera-fallback'),
@@ -52,7 +46,6 @@ const el = {
   verdict: $('verdict'),
   similarBox: $('similar-box'),
   similarList: $('similar-list'),
-  noteRow: $('note-row'),
   note: $('note-input'),
   tag: $('btn-tag'),
   recheck: $('btn-recheck'),
@@ -80,24 +73,16 @@ const state = {
   busy: false,
 };
 
-/* Small helpers ----------------------------------------------------------- */
+let backend;
 
-function deviceId() {
-  let id = localStorage.getItem('tagcheck.device');
-  if (!id) {
-    id = (crypto.randomUUID && crypto.randomUUID())
-      || `dev-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    localStorage.setItem('tagcheck.device', id);
-  }
-  return id;
-}
+/* Small helpers ----------------------------------------------------------- */
 
 let toastTimer;
 function toast(message) {
   el.toast.textContent = message;
   el.toast.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.toast.hidden = true; }, 3200);
+  toastTimer = setTimeout(() => { el.toast.hidden = true; }, 3600);
 }
 
 function timeAgo(iso) {
@@ -123,6 +108,11 @@ function currentPosition() {
       { timeout: 4000, maximumAge: 60000, enableHighAccuracy: false },
     );
   });
+}
+
+function handleSignedOut() {
+  toast('Signed out. Please join again.');
+  showSignIn();
 }
 
 /* Views ------------------------------------------------------------------- */
@@ -155,19 +145,18 @@ function setVerdict(kind, title, detail) {
   el.verdict.querySelector('.verdict-detail').textContent = detail || '';
 }
 
-function updateNetChip() {
-  queueCount().then((pending) => {
-    if (pending > 0) {
-      el.netChip.textContent = `${pending} to send`;
-      el.netChip.className = 'chip pending';
-    } else if (navigator.onLine) {
-      el.netChip.textContent = 'online';
-      el.netChip.className = 'chip';
-    } else {
-      el.netChip.textContent = 'offline';
-      el.netChip.className = 'chip offline';
-    }
-  });
+async function updateNetChip() {
+  const pending = await backend.pendingCount().catch(() => 0);
+  if (pending > 0) {
+    el.netChip.textContent = `${pending} to send`;
+    el.netChip.className = 'chip pending';
+  } else if (navigator.onLine) {
+    el.netChip.textContent = 'online';
+    el.netChip.className = 'chip';
+  } else {
+    el.netChip.textContent = 'offline';
+    el.netChip.className = 'chip offline';
+  }
 }
 
 /* Camera ------------------------------------------------------------------ */
@@ -235,11 +224,8 @@ async function scanFromCanvas(canvas) {
     const reading = bestReading(candidates);
     ocrStatus(null);
 
-    if (!reading) {
-      openResult('', { unread: true });
-      return;
-    }
-    openResult(reading.plate, { reading });
+    if (!reading) openResult('', { unread: true });
+    else openResult(reading.plate, { reading });
   } catch {
     ocrStatus(null);
     openResult('', { unread: true });
@@ -318,34 +304,10 @@ function renderSimilar(similar) {
     const plate = document.createElement('span');
     plate.className = 'plate';
     plate.textContent = formatPlate(item.plate);
-    li.append(plate, document.createTextNode(
-      ` - ${item.taggedBy}, ${timeAgo(item.createdAt)}`,
-    ));
+    li.append(plate, document.createTextNode(` - ${item.taggedBy}, ${timeAgo(item.createdAt)}`));
     el.similarList.append(li);
   }
   el.similarBox.hidden = false;
-}
-
-/** Answer from the phone when the network cannot be reached. */
-async function offlineLookup(reading) {
-  const hit = await localPlate(reading.plate);
-  if (hit) {
-    return {
-      status: 'tagged',
-      offline: true,
-      tag: { plate: hit.plate, taggedBy: hit.taggedBy, createdAt: hit.createdAt, note: '' },
-      similar: [],
-    };
-  }
-  const similar = await localSimilar(reading.fuzzy, reading.plate);
-  return {
-    status: similar.length ? 'similar' : 'free',
-    offline: true,
-    tag: null,
-    similar: similar.map((row) => ({
-      plate: row.plate, taggedBy: row.taggedBy, createdAt: row.createdAt,
-    })),
-  };
 }
 
 async function lookupPlate(rawPlate) {
@@ -358,21 +320,20 @@ async function lookupPlate(rawPlate) {
 
   state.reading = reading;
   el.tag.disabled = true;
+  // The previous answer is stale from here on, including who could undo it.
+  el.untag.hidden = true;
   setVerdict('busy', 'Checking...', 'Asking the club records.');
 
   let result;
   try {
-    result = navigator.onLine ? await api.lookup(reading.plate) : await offlineLookup(reading);
+    result = await backend.lookup(reading);
   } catch (error) {
-    if (error instanceof OfflineError) result = await offlineLookup(reading);
-    else if (error instanceof ApiError && error.status === 401) {
-      session.clear();
-      showSignIn();
-      return;
-    } else {
-      setVerdict('busy', 'Could not check', 'Try again in a moment.');
+    if (error.code === 'signed_out') {
+      handleSignedOut();
       return;
     }
+    setVerdict('busy', 'Could not check', 'Try again in a moment.');
+    return;
   }
 
   state.lookup = result;
@@ -387,9 +348,7 @@ async function lookupPlate(rawPlate) {
     );
     el.tag.disabled = true;
     renderSimilar([]);
-    const member = session.member;
-    const mine = member && tag.taggedById === member.id;
-    el.untag.hidden = !(mine || (member && member.admin)) || result.offline || !tag.id;
+    el.untag.hidden = !backend.canUntag(tag);
   } else if (result.status === 'similar') {
     setVerdict(
       'maybe',
@@ -416,49 +375,37 @@ async function tagCurrent() {
 
   el.tag.disabled = true;
   const position = await currentPosition();
-  const payload = {
-    plate: reading.plate,
-    note: el.note.value.trim(),
-    clientTagId: (crypto.randomUUID && crypto.randomUUID()) || `t-${Date.now()}-${Math.random()}`,
-    ...(position || {}),
-  };
 
   try {
-    const result = await api.tag(payload);
-    if (result.conflict) {
-      state.lookup = result;
+    const result = await backend.tag({
+      reading,
+      note: el.note.value.trim(),
+      lat: position?.lat,
+      lon: position?.lon,
+    });
+
+    if (result.status === 'conflict') {
+      state.lookup = { status: 'tagged', tag: result.tag, similar: [] };
       setVerdict(
         'taken',
         'Someone got there first',
         `${result.tag.taggedBy} tagged this bike ${timeAgo(result.tag.createdAt)}. Leave it alone.`,
       );
-      await rememberLocalTag({
-        plate: result.tag.plate, fuzzy: reading.fuzzy, taggedBy: result.tag.taggedBy,
-      });
       return;
     }
-    await rememberLocalTag({
-      plate: reading.plate, fuzzy: reading.fuzzy, taggedBy: result.tag.taggedBy,
-    });
-    setVerdict('free', 'Tagged', `Recorded as yours. ${formatPlate(reading.plate)} is now on the list.`);
-    toast('Tagged. Hang the sign.');
-    setTimeout(closeResult, 1200);
-  } catch (error) {
-    if (error instanceof OfflineError) {
-      // Keep the member moving: queue it and let the server settle duplicates
-      // when the phone reconnects.
-      await queueAdd({ ...payload, fuzzy: reading.fuzzy, queuedAt: new Date().toISOString() });
-      await rememberLocalTag({
-        plate: reading.plate, fuzzy: reading.fuzzy, taggedBy: session.member?.name || 'you',
-      });
+
+    if (result.status === 'queued') {
       setVerdict('free', 'Saved on this phone', 'It will be sent as soon as you have signal.');
       toast('Saved offline.');
-      setTimeout(closeResult, 1400);
-    } else if (error instanceof ApiError && error.status === 401) {
-      session.clear();
-      showSignIn();
     } else {
-      toast('Could not save that. Try again.');
+      setVerdict('free', 'Tagged', `Recorded as yours. ${formatPlate(reading.plate)} is now on the list.`);
+      toast('Tagged. Hang the sign.');
+    }
+    setTimeout(closeResult, 1300);
+  } catch (error) {
+    if (error.code === 'signed_out') handleSignedOut();
+    else {
+      toast(error.code === 'offline' ? 'No signal, and it could not be saved.' : 'Could not save that.');
       el.tag.disabled = false;
     }
   } finally {
@@ -468,64 +415,13 @@ async function tagCurrent() {
 
 async function untagCurrent() {
   const tag = state.lookup?.tag;
-  if (!tag?.id) return;
+  if (!tag) return;
   try {
-    await api.untag(tag.id);
-    await forgetLocalTag(tag.plate);
+    await backend.untag(tag);
     toast('Tag removed.');
     await lookupPlate(tag.plate);
   } catch (error) {
-    toast(error instanceof OfflineError ? 'Needs a connection.' : 'Could not remove that tag.');
-  }
-}
-
-/* Queue and sync ---------------------------------------------------------- */
-
-async function flushQueue() {
-  if (!navigator.onLine || !session.token) return;
-  const pending = await queueAll();
-  let sent = 0;
-
-  for (const item of pending) {
-    try {
-      const result = await api.tag(item);
-      await queueRemove(item.clientTagId);
-      // A conflict still resolves the item: the bike is tagged either way.
-      if (result.conflict) {
-        await rememberLocalTag({
-          plate: result.tag.plate, fuzzy: item.fuzzy, taggedBy: result.tag.taggedBy,
-        });
-      } else {
-        sent += 1;
-      }
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 400) {
-        await queueRemove(item.clientTagId);
-      }
-      break;
-    }
-  }
-
-  if (sent) toast(`${sent} queued tag${sent > 1 ? 's' : ''} sent.`);
-  updateNetChip();
-}
-
-async function syncPlates({ announce } = {}) {
-  if (!navigator.onLine || !session.token) return;
-  try {
-    const since = await getMeta('lastSync');
-    const result = await api.sync(since);
-    if (result.full) await clearPlates();
-    await applyPlates(result.plates);
-    await setMeta('lastSync', result.now);
-    if (announce) toast(`Up to date. ${result.plates.length} change${result.plates.length === 1 ? '' : 's'}.`);
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 401) {
-      session.clear();
-      showSignIn();
-    } else if (announce) {
-      toast('Could not sync right now.');
-    }
+    toast(error.code === 'not_allowed' ? 'Only the member who tagged it, or an admin, can.' : 'Needs a connection.');
   }
 }
 
@@ -537,7 +433,7 @@ async function loadFeed(reset) {
     state.feedCursor = null;
   }
   try {
-    const result = await api.feed({
+    const result = await backend.feed({
       mine: state.feedMode === 'mine',
       before: state.feedCursor,
     });
@@ -556,8 +452,8 @@ async function loadFeed(reset) {
       }
       const who = document.createElement('div');
       who.className = 'who';
-      who.textContent = `${tag.taggedBy}\n${timeAgo(tag.createdAt)}`;
       who.style.whiteSpace = 'pre-line';
+      who.textContent = `${tag.taggedBy}\n${timeAgo(tag.createdAt)}`;
       li.append(left, who);
       el.feedList.append(li);
     }
@@ -575,7 +471,7 @@ async function loadFeed(reset) {
 
 async function loadStats() {
   try {
-    const result = await api.stats();
+    const result = await backend.stats();
     el.statTotal.textContent = result.total;
     el.statToday.textContent = result.today;
     el.statMembers.textContent = result.members;
@@ -589,57 +485,73 @@ async function loadStats() {
       li.append(count);
       el.leaderboard.append(li);
     }
-    const member = session.member;
-    el.adminTools.hidden = !(member && member.admin);
-    el.export.href = apiUrl('/api/export.csv');
+    el.adminTools.hidden = !backend.member()?.admin;
   } catch {
     toast('Totals need a connection.');
+  }
+}
+
+async function downloadExport(event) {
+  event.preventDefault();
+  try {
+    const csv = await backend.exportCsv();
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `tagcheck-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch {
+    toast('Export is for admins only.');
   }
 }
 
 /* Sign in ----------------------------------------------------------------- */
 
 async function loadClub() {
-  try {
-    const club = await api.club();
-    el.clubName.textContent = club.name;
-    el.topbarClub.textContent = club.name;
-    document.title = club.name === 'TagCheck' ? 'TagCheck' : `${club.name} - TagCheck`;
-  } catch {
-    // The club name is decoration; the app works without it.
-  }
+  const club = await backend.club();
+  el.clubName.textContent = club.name;
+  el.topbarClub.textContent = club.name;
+  document.title = club.name === 'TagCheck' ? 'TagCheck' : `${club.name} - TagCheck`;
 }
+
+const SIGNIN_MESSAGES = {
+  bad_code: 'That club code is not right.',
+  offline: 'Cannot reach the club records. Check your signal.',
+  anonymous_auth_disabled: 'This club is not set up yet: anonymous sign-in is off in Firebase.',
+};
 
 async function handleSignIn(event) {
   event.preventDefault();
   el.signinError.hidden = true;
 
-  const serverValue = el.server.value.trim();
-  if (serverValue) session.base = serverValue;
-  else session.base = '';
+  const button = el.signinForm.querySelector('button[type="submit"]');
+  button.disabled = true;
 
   try {
-    const result = await api.signIn(el.code.value, el.name.value, deviceId());
-    session.save(result);
-    await clearPlates();
-    await setMeta('lastSync', '');
+    await backend.signIn({
+      code: el.code.value.trim(),
+      name: el.name.value.trim(),
+      server: el.server.value.trim(),
+    });
     showApp();
     await loadClub();
-    await syncPlates();
+    await backend.sync().catch(() => {});
     updateNetChip();
   } catch (error) {
-    const message = error instanceof OfflineError
-      ? 'Cannot reach the club server. Check the address and your signal.'
-      : (error.code === 'bad_code' ? 'That club code is not right.' : 'Could not sign in. Try again.');
-    el.signinError.textContent = message;
+    el.signinError.textContent = SIGNIN_MESSAGES[error.code] || 'Could not join. Try again.';
     el.signinError.hidden = false;
+  } finally {
+    button.disabled = false;
   }
 }
 
-function signOut() {
-  session.clear();
-  clearPlates();
-  setMeta('lastSync', '');
+async function signOut() {
+  if (backend.mode === 'firebase'
+    && !confirm('Sign out? Your past tags stay on record, but this phone rejoins as a new member.')) {
+    return;
+  }
+  await backend.signOut();
   releaseEngine();
   showSignIn();
 }
@@ -678,6 +590,7 @@ function wire() {
   el.recheck.addEventListener('click', () => lookupPlate(el.plateInput.value));
   el.tag.addEventListener('click', tagCurrent);
   el.untag.addEventListener('click', untagCurrent);
+  el.export.addEventListener('click', downloadExport);
 
   // Editing the plate invalidates the previous answer, so the tag button waits
   // until the corrected plate has been checked.
@@ -704,37 +617,44 @@ function wire() {
   }
 
   el.feedMore.addEventListener('click', () => loadFeed(false));
+
   el.sync.addEventListener('click', async () => {
     el.menu.hidden = true;
-    await flushQueue();
-    await syncPlates({ announce: true });
+    try {
+      const result = await backend.sync();
+      toast(`Up to date. ${result.changes} on record.`);
+    } catch {
+      toast('Could not sync right now.');
+    }
+    updateNetChip();
   });
 
   el.locationToggle.addEventListener('click', () => {
-    const next = !locationEnabled();
-    localStorage.setItem('tagcheck.location', next ? 'on' : 'off');
+    localStorage.setItem('tagcheck.location', locationEnabled() ? 'off' : 'on');
     renderLocationToggle();
   });
 
   el.signout.addEventListener('click', signOut);
 
-  window.addEventListener('online', () => {
+  window.addEventListener('online', async () => {
+    await backend.sync().catch(() => {});
     updateNetChip();
-    flushQueue().then(() => syncPlates());
   });
   window.addEventListener('offline', updateNetChip);
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && !el.app.hidden) {
-      flushQueue().then(() => syncPlates());
-      if (el.panels.scan.hidden === false) startCamera();
+      backend.sync().catch(() => {});
+      if (!el.panels.scan.hidden) startCamera();
     } else {
       stopCamera();
     }
   });
 
   setInterval(() => {
-    if (document.visibilityState === 'visible') syncPlates();
+    if (document.visibilityState === 'visible' && !el.app.hidden) {
+      backend.sync().catch(() => {});
+    }
   }, SYNC_INTERVAL_MS);
 }
 
@@ -745,24 +665,37 @@ function renderLocationToggle() {
 }
 
 async function boot() {
+  backend = await getBackend();
+
+  backend.onChange(() => {
+    updateNetChip();
+    if (!el.panels.feed.hidden) loadFeed(true);
+    if (!el.panels.stats.hidden) loadStats();
+  });
+
+  backend.onLostRace((plate, taggedBy) => {
+    toast(`${formatPlate(plate)} was already tagged by ${taggedBy}. Your tag was not saved.`);
+  });
+
   wire();
   renderLocationToggle();
-  updateNetChip();
+
+  // The server address only means anything when there is a server.
+  if (backend.mode === 'firebase' && el.serverRow) el.serverRow.hidden = true;
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
 
-  await loadClub();
+  await loadClub().catch(() => {});
 
-  if (session.token && session.member) {
+  if (await backend.resume().catch(() => false)) {
     showApp();
-    await flushQueue();
-    await syncPlates();
+    await backend.sync().catch(() => {});
   } else {
     showSignIn();
-    el.server.value = session.base;
   }
+  updateNetChip();
 }
 
 boot();

@@ -1,6 +1,6 @@
 /** Client-side settings. Everything here is safe to publish. */
 
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.1.0';
 
 /**
  * Where the recognition engine is loaded from.

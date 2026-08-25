@@ -11,3 +11,11 @@ Thumbs.db
 *.log
 .vscode/
 .idea/
+
+# Firebase
+public/
+.firebase/
+.firebaserc
+firebase-debug.log
+firestore-debug.log
+ui-debug.log

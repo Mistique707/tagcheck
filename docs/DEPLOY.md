@@ -7,6 +7,12 @@ pick any option below that ends in a certificate.
 You also need somewhere the SQLite file survives restarts. It is a single file;
 back it up by copying it.
 
+> **Not sure you want to host anything?** You do not have to. The Firebase
+> setup runs the whole thing on Google's free tier with no server and no
+> monthly cost, and HTTPS is included — see
+> [FIREBASE.md](FIREBASE.md). The rest of this page is for running the
+> Node server yourself.
+
 ---
 
 ## Option 1: Docker on a small server

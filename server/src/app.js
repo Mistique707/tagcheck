@@ -23,10 +23,20 @@ export function createApp() {
         baseUri: ["'self'"],
         frameAncestors: ["'none'"],
         objectSrc: ["'none'"],
-        // The OCR engine ships as a wasm module that spawns a blob worker.
-        scriptSrc: ["'self'", 'https://cdn.jsdelivr.net', 'blob:', "'wasm-unsafe-eval'"],
+        // The OCR engine ships as a wasm module that spawns a blob worker, and
+        // gstatic serves the Firebase SDK when a club runs the serverless setup.
+        scriptSrc: [
+          "'self'", 'https://cdn.jsdelivr.net', 'https://www.gstatic.com',
+          'blob:', "'wasm-unsafe-eval'",
+        ],
         workerSrc: ["'self'", 'blob:'],
-        connectSrc: ["'self'", 'https://cdn.jsdelivr.net', 'blob:', 'data:'],
+        connectSrc: [
+          "'self'", 'https://cdn.jsdelivr.net', 'https://www.gstatic.com',
+          // Firestore and anonymous auth, used only in the serverless setup.
+          'https://firestore.googleapis.com', 'https://identitytoolkit.googleapis.com',
+          'https://securetoken.googleapis.com',
+          'blob:', 'data:',
+        ],
         imgSrc: ["'self'", 'data:', 'blob:'],
         styleSrc: ["'self'", "'unsafe-inline'"],
         mediaSrc: ["'self'", 'blob:'],

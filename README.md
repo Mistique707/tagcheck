@@ -38,9 +38,30 @@ There is no app store, no install, no accounts. A member opens a link, types
 their name and the club code once, and adds the page to their home screen.
 It works on iPhone and Android from the same address.
 
-## Quick start
+## Where it runs
 
-Requires [Node.js](https://nodejs.org) 22.5 or newer (24 recommended).
+The club records have to live somewhere every member's phone can reach, so
+there is one decision to make. Both options run the same app.
+
+### Firebase — free, nothing to host *(recommended)*
+
+Google serves the app and holds the records. You run no server and pay nothing;
+HTTPS comes included, which matters because **iOS will not give a web page the
+camera without it**. Comfortably inside the free tier for a club of 10-15.
+
+**→ [docs/FIREBASE.md](docs/FIREBASE.md)** — about 15 minutes, once.
+
+The duplicate guarantee survives the move: a tag document is keyed by the plate
+and the security rules allow `create` but never `update`, so a second person
+tagging one bike is refused by Firestore itself. That rule is
+[tested against the emulator](test/firestore-rules.spec.mjs), not assumed.
+
+### Self-hosted — a small Node server you control
+
+One process and a SQLite file, on Docker, a VPS, or a spare machine at home.
+Choose this if you would rather the data never leave your own box.
+
+**→ [docs/DEPLOY.md](docs/DEPLOY.md)**
 
 ```bash
 git clone https://github.com/Mistique707/tagcheck.git
@@ -52,35 +73,21 @@ cd tagcheck && npm install && npm start
 
 The server prints a generated join code on first boot. Open
 `http://localhost:3000`, sign in with it, and press **Type it** to try a plate.
+Add sample data with `npm run seed`.
 
-To try it with sample data in place:
-
-```bash
-npm run seed
-```
-
-### Putting it in front of your club
-
-Members need an address they can reach from their phones, and iOS only gives a
-web page the camera over **HTTPS** (`localhost` is the one exception). So for a
-real drive, deploy it somewhere with a certificate rather than sharing a laptop
-IP. See [docs/DEPLOY.md](docs/DEPLOY.md) for Docker, a one-container host, and
-the GitHub Pages split.
-
-Then set your own codes so they survive restarts:
+For a real drive, set your own codes so they survive restarts:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `CLUB_NAME`, `JOIN_CODE`, `ADMIN_CODE` and `JWT_SECRET`, then:
+Edit `CLUB_NAME`, `JOIN_CODE`, `ADMIN_CODE` and `JWT_SECRET`, then run
+`node --env-file=.env server/src/index.js`.
 
-```bash
-node --env-file=.env server/src/index.js
-```
+---
 
-Share the address and the join code in the group chat. That is the whole
-onboarding.
+Either way, onboarding a member is the same: send them the address and the join
+code. They type their name once and add the page to their home screen.
 
 ## Using it on a drive
 
@@ -119,16 +126,26 @@ just be rewritten, so both are shown to a human. This is what a shape key is
 for: every confusable character collapses to one representative, and a
 collision means "look at these two before you tag".
 
-**4. A unique index.** All of the above is judgement, and judgement can be
-wrong under a race. The real guarantee is in SQLite:
+**4. A constraint in the data store.** All of the above is judgement, and
+judgement can be wrong under a race. The real guarantee sits below the
+application, in whichever store you chose.
+
+Self-hosted, it is a partial unique index:
 
 ```sql
 CREATE UNIQUE INDEX ux_tags_active_plate ON tags(plate) WHERE removed_at IS NULL;
 ```
 
-Two phones tagging the same bike in the same second: one INSERT succeeds, the
-other comes back `409` with the winner's name. The index is partial, so a tag
-that gets removed frees the bike to be tagged again.
+On Firebase, it is a security rule over a document keyed by the plate:
+
+```
+allow create: if isMember() && request.resource.data.plate == plateId;
+allow update: if false;
+```
+
+Either way, two phones tagging the same bike in the same second means one write
+lands and the other is refused with the winner's name — and removing a tag
+frees the bike to be tagged again.
 
 ## Working without signal
 
@@ -186,8 +203,12 @@ All routes except `/api/health`, `/api/club` and `/api/session` need
 A tag stores the plate, who tagged it, when, an optional note, and — only if a
 member switches it on — a coarse location. Plates are vehicle registrations,
 not personal profiles, and nothing is looked up against any vehicle registry.
-It all lives in a SQLite file you host. Location is **off by default** and the
-app never asks for it until a member turns it on.
+Location is **off by default** and the app never asks for it until a member
+turns it on.
+
+The records live in a SQLite file you host, or in your own Firebase project.
+Members sign in anonymously: on Firebase nobody supplies an email, a phone
+number or a password, and a member record holds only the name they typed.
 
 Recognition runs on the phone. With the default setup the engine itself is
 fetched from a public CDN; run `npm run vendor:ocr` to serve it from your own
@@ -207,15 +228,26 @@ npm test
 37 tests cover the normaliser (canonical forms, look-alike repair, shape keys)
 and the API (duplicate blocking, races, offline replay, undo, permissions).
 
+```bash
+npm run test:rules
+```
+
+25 more run the Firestore security rules against a local emulator — joining,
+admin promotion, tag immutability, the undo window, and the duplicate
+guarantee. Needs Java installed; CI runs them on every push.
+
 ```
 shared/plate.js      the normaliser, imported unchanged by server and browser
 server/src/          Express + node:sqlite, no ORM
+firestore.rules      the entire security model for the serverless setup
 web/                 the app: no build step, no framework, native ES modules
-tools/               icon generator, OCR vendoring, sample data
+web/backend*.js      the two storage backends behind one interface
+tools/               icon generator, OCR vendoring, sample data, site assembly
 ```
 
 There is no bundler. `web/` is what ships, which means a member's phone gets
-roughly 70 kB of application code.
+roughly 80 kB of application code. Which backend runs is decided by whether
+`web/firebase-config.js` has a config in it; nothing else in the app changes.
 
 ## Known limits
 
@@ -226,9 +258,10 @@ roughly 70 kB of application code.
   development browser used here blocks registration outright. Everything else
   in the offline path (mirror, queue, replay) is tested and working. Please
   check home-screen install on a real handset before a large drive.
-- **One club per server.** There is no multi-tenancy; run a second instance.
+- **One club per deployment.** There is no multi-tenancy; run a second instance
+  or a second Firebase project.
 - **Codes are shared secrets.** Anyone with the join code can add tags. That is
-  the right trade for a volunteer drive, but rotate `JOIN_CODE` when it leaks.
+  the right trade for a volunteer drive, but rotate the code when it leaks.
 
 ## License
 

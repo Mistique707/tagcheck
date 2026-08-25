@@ -1,6 +1,6 @@
 {
   "name": "tagcheck",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Scan a motorcycle number plate to check whether your club has already tagged that bike, then tag it if nobody has.",
   "type": "module",
   "private": false,
@@ -12,10 +12,19 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning server/src/index.js",
     "dev": "node --watch --disable-warning=ExperimentalWarning server/src/index.js",
-    "test": "node --disable-warning=ExperimentalWarning --test",
+    "test": "node --disable-warning=ExperimentalWarning --test \"server/test/*.test.js\"",
+    "test:rules": "npx --yes firebase-tools@15 emulators:exec --only firestore --project tagcheck-rules-test \"node --test test/firestore-rules.spec.mjs\"",
+    "build:web": "node tools/build-web.mjs",
+    "firebase:deploy": "npm run build:web && npx --yes firebase-tools@15 deploy",
+    "firebase:rules": "npx --yes firebase-tools@15 deploy --only firestore:rules",
+    "firebase:emulate": "npm run build:web && npx --yes firebase-tools@15 emulators:start",
     "icons": "node tools/make-icons.mjs",
     "seed": "node --disable-warning=ExperimentalWarning tools/seed.mjs",
     "vendor:ocr": "node tools/vendor-ocr.mjs"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
+    "firebase": "^12.18.0"
   },
   "dependencies": {
     "cors": "^2.8.5",
