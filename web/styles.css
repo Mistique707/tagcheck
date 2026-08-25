@@ -178,6 +178,21 @@ input:focus-visible, button:focus-visible, summary:focus-visible {
 /* Panels ----------------------------------------------------------------- */
 .panel { padding: 16px; max-width: 560px; margin: 0 auto; }
 
+/* The one number a member actually wants to see between scans. */
+.tally {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.tally span { color: var(--text); font-weight: 750; font-size: 1.05rem; }
+.tally .tally-sep { color: var(--line); font-weight: 400; margin: 0 4px; }
+
 /* Camera ----------------------------------------------------------------- */
 .camera-wrap {
   position: relative;

@@ -25,7 +25,11 @@ const el = {
   name: $('input-name'),
   code: $('input-code'),
   server: $('input-server'),
-  serverRow: document.querySelector('.advanced'),
+  codeFallback: $('code-fallback'),
+  serverFallback: $('server-fallback'),
+  tally: $('my-tally'),
+  tallyMine: $('tally-mine'),
+  tallyAll: $('tally-all'),
   clubName: $('club-name'),
   topbarClub: $('topbar-club'),
   netChip: $('net-chip'),
@@ -56,7 +60,6 @@ const el = {
   statTotal: $('stat-total'),
   statToday: $('stat-today'),
   statMembers: $('stat-members'),
-  adminTools: $('admin-tools'),
   export: $('link-export'),
   sync: $('btn-sync'),
   locationToggle: $('btn-location'),
@@ -98,6 +101,38 @@ function timeAgo(iso) {
 
 const locationEnabled = () => localStorage.getItem('tagcheck.location') === 'on';
 
+/**
+ * The club code travels in the invite link so nobody has to type it:
+ *
+ *   https://your-club.web.app/#join=RIDE01
+ *
+ * It is remembered on first open, because a phone launching the app from the
+ * home screen will not have the link any more. The fragment is then wiped from
+ * the address bar so the code is not sitting in a screenshot.
+ */
+function takeCodeFromLink() {
+  const fromHash = new URLSearchParams(location.hash.replace(/^#/, '')).get('join');
+  const fromQuery = new URLSearchParams(location.search).get('join');
+  const code = (fromHash || fromQuery || '').trim();
+
+  if (code) {
+    localStorage.setItem('tagcheck.code', code);
+    history.replaceState(null, '', location.pathname);
+  }
+  return localStorage.getItem('tagcheck.code') || '';
+}
+
+async function refreshTally() {
+  try {
+    const result = await backend.stats();
+    el.tallyMine.textContent = result.mine ?? 0;
+    el.tallyAll.textContent = result.total ?? 0;
+    el.tally.hidden = false;
+  } catch {
+    el.tally.hidden = true;
+  }
+}
+
 /** Never let a slow fix hold up a tag: no answer within 4s means no answer. */
 function currentPosition() {
   if (!locationEnabled() || !navigator.geolocation) return Promise.resolve(null);
@@ -127,6 +162,7 @@ function showApp() {
   el.signin.hidden = true;
   el.app.hidden = false;
   showPanel('scan');
+  refreshTally();
 }
 
 function showPanel(name) {
@@ -421,7 +457,7 @@ async function untagCurrent() {
     toast('Tag removed.');
     await lookupPlate(tag.plate);
   } catch (error) {
-    toast(error.code === 'not_allowed' ? 'Only the member who tagged it, or an admin, can.' : 'Needs a connection.');
+    toast(error.code === 'not_allowed' ? 'That tag could not be removed.' : 'Needs a connection.');
   }
 }
 
@@ -485,7 +521,6 @@ async function loadStats() {
       li.append(count);
       el.leaderboard.append(li);
     }
-    el.adminTools.hidden = !backend.member()?.admin;
   } catch {
     toast('Totals need a connection.');
   }
@@ -502,7 +537,7 @@ async function downloadExport(event) {
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   } catch {
-    toast('Export is for admins only.');
+    toast('Could not build the export. Try again with a connection.');
   }
 }
 
@@ -516,7 +551,8 @@ async function loadClub() {
 }
 
 const SIGNIN_MESSAGES = {
-  bad_code: 'That club code is not right.',
+  bad_code: 'This invite link is not valid for this club. Ask for a fresh one.',
+  no_code: 'This link is missing its club code. Ask whoever set it up to resend the invite link.',
   offline: 'Cannot reach the club records. Check your signal.',
   anonymous_auth_disabled: 'This club is not set up yet: anonymous sign-in is off in Firebase.',
 };
@@ -528,17 +564,30 @@ async function handleSignIn(event) {
   const button = el.signinForm.querySelector('button[type="submit"]');
   button.disabled = true;
 
+  // The link supplies the code; the typed field is only a fallback for when a
+  // messaging app has eaten the fragment.
+  const code = (localStorage.getItem('tagcheck.code') || el.code.value || '').trim();
+
   try {
+    if (!code) throw Object.assign(new Error('no_code'), { code: 'no_code' });
+
     await backend.signIn({
-      code: el.code.value.trim(),
+      code,
       name: el.name.value.trim(),
       server: el.server.value.trim(),
     });
+    localStorage.setItem('tagcheck.code', code);
     showApp();
     await loadClub();
     await backend.sync().catch(() => {});
     updateNetChip();
   } catch (error) {
+    if (error.code === 'bad_code' || error.code === 'no_code') {
+      // Let them type it rather than leaving them stuck on a broken link.
+      el.codeFallback.hidden = false;
+      el.codeFallback.open = true;
+      if (error.code === 'bad_code') localStorage.removeItem('tagcheck.code');
+    }
     el.signinError.textContent = SIGNIN_MESSAGES[error.code] || 'Could not join. Try again.';
     el.signinError.hidden = false;
   } finally {
@@ -669,6 +718,9 @@ async function boot() {
 
   backend.onChange(() => {
     updateNetChip();
+    // The tally sits on the scan screen, so it has to move as tags land --
+    // including tags other members make while this phone is open.
+    if (!el.app.hidden) refreshTally();
     if (!el.panels.feed.hidden) loadFeed(true);
     if (!el.panels.stats.hidden) loadStats();
   });
@@ -680,8 +732,13 @@ async function boot() {
   wire();
   renderLocationToggle();
 
+  // Take the club code out of the invite link before anything is rendered, so
+  // a member only ever sees a name box.
+  const code = takeCodeFromLink();
+  if (!code) el.codeFallback.hidden = false;
+
   // The server address only means anything when there is a server.
-  if (backend.mode === 'firebase' && el.serverRow) el.serverRow.hidden = true;
+  if (backend.mode === 'firebase' && el.serverFallback) el.serverFallback.hidden = true;
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});

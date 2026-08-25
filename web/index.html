@@ -22,16 +22,21 @@
     <h1 class="brand"><span class="brand-mark">TC</span> <span id="club-name">TagCheck</span></h1>
     <p class="muted">Check before you tag, so no bike gets two signs.</p>
     <form id="signin-form" autocomplete="on">
-      <label for="input-name">Your name</label>
+      <label for="input-name">What should we call you?</label>
       <input id="input-name" name="name" type="text" required minlength="2" maxlength="40"
-             placeholder="e.g. Asha" autocomplete="name">
+             placeholder="e.g. Asha" autocomplete="name" enterkeyhint="go">
+      <p class="hint">Just once. Your tags get filed under this name.</p>
 
-      <label for="input-code">Club code</label>
-      <input id="input-code" name="code" type="text" required
-             placeholder="Ask whoever runs the drive" autocapitalize="characters"
-             autocomplete="one-time-code" spellcheck="false">
+      <!-- Normally filled in by the invite link, so nobody has to type it. -->
+      <details class="advanced" id="code-fallback" hidden>
+        <summary>I was given a code</summary>
+        <label for="input-code">Club code</label>
+        <input id="input-code" type="text" placeholder="e.g. RIDE01"
+               autocapitalize="characters" autocomplete="off" spellcheck="false">
+        <p class="hint">Only needed if your invite link lost its code on the way.</p>
+      </details>
 
-      <details class="advanced">
+      <details class="advanced" id="server-fallback">
         <summary>Connect to a different server</summary>
         <label for="input-server">Server address</label>
         <input id="input-server" type="url" inputmode="url" placeholder="https://tagcheck.example.com"
@@ -69,6 +74,9 @@
 
   <!-- Scan ------------------------------------------------------------- -->
   <main id="panel-scan" class="panel">
+    <p id="my-tally" class="tally"><span id="tally-mine">0</span> tagged by you
+      <span class="tally-sep">/</span> <span id="tally-all">0</span> by the club</p>
+
     <div id="camera-wrap" class="camera-wrap">
       <video id="video" playsinline muted autoplay></video>
       <div class="guide"><span class="guide-hint">Fill the box with the number plate</span></div>
@@ -143,10 +151,10 @@
       <div class="stat"><span id="stat-today">0</span><small>today</small></div>
       <div class="stat"><span id="stat-members">0</span><small>members</small></div>
     </div>
-    <h3>Leaderboard</h3>
+    <h3>Who has tagged what</h3>
     <ol id="leaderboard" class="leaderboard"></ol>
-    <p id="admin-tools" hidden>
-      <a id="link-export" class="btn btn-ghost" href="#">Download CSV</a>
+    <p id="export-tools">
+      <a id="link-export" class="btn btn-ghost" href="#">Download the list as CSV</a>
     </p>
   </main>
 

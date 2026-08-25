@@ -3,9 +3,7 @@ import rateLimit from 'express-rate-limit';
 
 import { normalizePlate } from '../../../shared/plate.js';
 import { config } from '../config.js';
-import {
-  checkCode, issueToken, requireAdmin, requireMember,
-} from '../auth.js';
+import { checkCode, issueToken, requireMember } from '../auth.js';
 import {
   allTagsForExport, findActiveTag, findByClientTagId, findSimilarTags, findTagById,
   insertTag, listTags, removeTag, stats, tagsChangedSince, upsertMember,
@@ -53,8 +51,7 @@ function isUniqueViolation(error) {
 api.post('/session', signInLimit, (req, res) => {
   const { code, name, deviceId } = req.body ?? {};
 
-  const role = checkCode(code);
-  if (!role) return res.status(401).json({ error: 'bad_code' });
+  if (!checkCode(code)) return res.status(401).json({ error: 'bad_code' });
 
   const cleanName = String(name ?? '').trim().slice(0, 40);
   if (cleanName.length < 2) return res.status(400).json({ error: 'name_required' });
@@ -62,15 +59,11 @@ api.post('/session', signInLimit, (req, res) => {
   const cleanDevice = String(deviceId ?? '').trim().slice(0, 64);
   if (cleanDevice.length < 8) return res.status(400).json({ error: 'device_id_required' });
 
-  const member = upsertMember({
-    name: cleanName,
-    deviceId: cleanDevice,
-    isAdmin: role === 'admin',
-  });
+  const member = upsertMember({ name: cleanName, deviceId: cleanDevice });
 
   return res.json({
     token: issueToken(member),
-    member: { id: member.id, name: member.name, admin: Boolean(member.is_admin) },
+    member: { id: member.id, name: member.name },
     club: { name: config.clubName, joinUrl: config.joinUrl },
   });
 });
@@ -161,18 +154,13 @@ api.get('/tags', requireMember, (req, res) => {
 });
 
 /**
- * Untag a bike (the sign fell off, or it was a mistake). Members may undo their
- * own recent tags; admins may remove anything.
+ * Untag a bike: the sign fell off, or it was a mistake. Any member may do this.
+ * The club is a group of friends, and the common case is fixing someone else's
+ * mistake while they are not around.
  */
 api.delete('/tags/:id', requireMember, (req, res) => {
   const tag = findTagById(Number(req.params.id));
   if (!tag || tag.removed_at) return res.status(404).json({ error: 'not_found' });
-
-  const isOwner = tag.member_id === req.member.id;
-  const withinWindow = Date.now() - Date.parse(tag.created_at) < config.undoWindowMs;
-  if (!req.member.is_admin && !(isOwner && withinWindow)) {
-    return res.status(403).json({ error: 'not_allowed' });
-  }
 
   return res.json({ tag: publicTag(removeTag(tag.id, req.member.id)) });
 });
@@ -194,11 +182,11 @@ api.get('/sync', requireMember, (req, res) => {
   });
 });
 
-api.get('/stats', requireMember, (_req, res) => {
-  res.json(stats());
+api.get('/stats', requireMember, (req, res) => {
+  res.json(stats(req.member.id));
 });
 
-api.get('/export.csv', requireMember, requireAdmin, (_req, res) => {
+api.get('/export.csv', requireMember, (_req, res) => {
   const escape = (value) => {
     const text = value === null || value === undefined ? '' : String(value);
     return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;

@@ -21,7 +21,6 @@ import {
 } from 'firebase/firestore';
 
 const JOIN_CODE = 'RIDE01';
-const ADMIN_CODE = 'BOSS99';
 
 const testEnv = await initializeTestEnvironment({
   projectId: 'tagcheck-rules-test',
@@ -40,12 +39,12 @@ async function reset() {
   await testEnv.withSecurityRulesDisabled(async (context) => {
     const db = context.firestore();
     await setDoc(doc(db, 'config', 'public'), { name: 'Night Owls MC', joinUrl: '' });
-    await setDoc(doc(db, 'config', 'secrets'), { joinCode: JOIN_CODE, adminCode: ADMIN_CODE });
+    await setDoc(doc(db, 'config', 'secrets'), { joinCode: JOIN_CODE });
     await setDoc(doc(db, 'members', 'asha'), {
-      name: 'Asha', code: JOIN_CODE, admin: false, createdAt: new Date(),
+      name: 'Asha', code: JOIN_CODE, createdAt: new Date(),
     });
     await setDoc(doc(db, 'members', 'ravi'), {
-      name: 'Ravi', code: ADMIN_CODE, admin: true, createdAt: new Date(),
+      name: 'Ravi', code: JOIN_CODE, createdAt: new Date(),
     });
   });
 }
@@ -56,9 +55,9 @@ const asRavi = () => testEnv.authenticatedContext('ravi').firestore();
 const asStranger = () => testEnv.unauthenticatedContext().firestore();
 
 /**
- * A valid tag payload. The rules require createdAt to be the server's own
- * clock, so a real client must use serverTimestamp() -- a date chosen by the
- * phone is refused, which is what stops a backdated tag.
+ * A valid tag payload. The rules require createdAt to be the server clock, so a
+ * real client must use serverTimestamp() -- a date chosen by the phone is
+ * refused, which is what stops a backdated tag.
  */
 function tagPayload(uid, name, plate, extra = {}) {
   return {
@@ -73,6 +72,8 @@ function tagPayload(uid, name, plate, extra = {}) {
   };
 }
 
+const joinPayload = (name) => ({ name, code: JOIN_CODE, createdAt: new Date() });
+
 /* Config ------------------------------------------------------------------ */
 
 test('anyone may read the club name', async () => {
@@ -80,7 +81,7 @@ test('anyone may read the club name', async () => {
   await assertSucceeds(getDoc(doc(asStranger(), 'config', 'public')));
 });
 
-test('nobody may read the join and admin codes', async () => {
+test('nobody may read the join code', async () => {
   await reset();
   await assertFails(getDoc(doc(asStranger(), 'config', 'secrets')));
   await assertFails(getDoc(doc(asAsha(), 'config', 'secrets')));
@@ -95,52 +96,53 @@ test('nobody may rewrite the club config', async () => {
 
 /* Joining ----------------------------------------------------------------- */
 
-test('the join code lets a new phone become a member', async () => {
+test('the code from the invite link lets a new phone become a member', async () => {
   await reset();
-  await assertSucceeds(setDoc(doc(asBala(), 'members', 'bala'), {
-    name: 'Bala', code: JOIN_CODE, admin: false, createdAt: new Date(),
-  }));
+  await assertSucceeds(setDoc(doc(asBala(), 'members', 'bala'), joinPayload('Bala')));
 });
 
 test('a wrong code cannot become a member', async () => {
   await reset();
   await assertFails(setDoc(doc(asBala(), 'members', 'bala'), {
-    name: 'Bala', code: 'GUESS', admin: false, createdAt: new Date(),
+    name: 'Bala', code: 'GUESS', createdAt: new Date(),
   }));
 });
 
-test('the join code cannot grant admin', async () => {
+test('a missing code cannot become a member', async () => {
   await reset();
   await assertFails(setDoc(doc(asBala(), 'members', 'bala'), {
-    name: 'Bala', code: JOIN_CODE, admin: true, createdAt: new Date(),
+    name: 'Bala', createdAt: new Date(),
   }));
 });
 
-test('the admin code does grant admin', async () => {
+test('a nameless or absurdly long name is refused', async () => {
   await reset();
-  await assertSucceeds(setDoc(doc(asBala(), 'members', 'bala'), {
-    name: 'Bala', code: ADMIN_CODE, admin: true, createdAt: new Date(),
-  }));
+  for (const name of ['A', 'x'.repeat(41)]) {
+    await assertFails(setDoc(doc(asBala(), 'members', 'bala'), {
+      name, code: JOIN_CODE, createdAt: new Date(),
+    }));
+  }
 });
 
 test('a member cannot create a record for someone else', async () => {
   await reset();
-  await assertFails(setDoc(doc(asBala(), 'members', 'asha'), {
-    name: 'Not Asha', code: JOIN_CODE, admin: false, createdAt: new Date(),
-  }));
+  await assertFails(setDoc(doc(asBala(), 'members', 'asha'), joinPayload('Not Asha')));
 });
 
-test('a member may fix their own name but not promote themselves', async () => {
+test('a member may fix their own name', async () => {
   await reset();
   await assertSucceeds(updateDoc(doc(asAsha(), 'members', 'asha'), { name: 'Asha K' }));
-  await assertFails(updateDoc(doc(asAsha(), 'members', 'asha'), { admin: true }));
 });
 
-test('members cannot read each other, but admins can', async () => {
+test('a member cannot swap the code stored on their own record', async () => {
   await reset();
-  await assertFails(getDoc(doc(asAsha(), 'members', 'ravi')));
+  await assertFails(updateDoc(doc(asAsha(), 'members', 'asha'), { code: 'GUESS' }));
+});
+
+test('members cannot read each other', async () => {
+  await reset();
   await assertSucceeds(getDoc(doc(asAsha(), 'members', 'asha')));
-  await assertSucceeds(getDoc(doc(asRavi(), 'members', 'asha')));
+  await assertFails(getDoc(doc(asAsha(), 'members', 'ravi')));
 });
 
 /* Tagging ----------------------------------------------------------------- */
@@ -178,9 +180,7 @@ test('THE GUARANTEE: a second member cannot overwrite an existing tag', async ()
     tagPayload('asha', 'Asha', 'MH12AB1234'),
   ));
   // Bala joins properly, then tries to take the same bike.
-  await setDoc(doc(asBala(), 'members', 'bala'), {
-    name: 'Bala', code: JOIN_CODE, admin: false, createdAt: new Date(),
-  });
+  await setDoc(doc(asBala(), 'members', 'bala'), joinPayload('Bala'));
   await assertFails(setDoc(
     doc(asBala(), 'tags', 'MH12AB1234'),
     tagPayload('bala', 'Bala', 'MH12AB1234'),
@@ -193,7 +193,7 @@ test('a tag can never be edited, not even by the member who made it', async () =
   await assertFails(updateDoc(doc(asAsha(), 'tags', 'MH12AB1234'), { note: 'changed' }));
 });
 
-test('a tag cannot be filed under someone elses name', async () => {
+test('a tag cannot be filed under another members name', async () => {
   await reset();
   await assertFails(setDoc(
     doc(asAsha(), 'tags', 'KA01HA9999'),
@@ -227,32 +227,14 @@ test('a backdated tag is refused', async () => {
 
 /* Removing ---------------------------------------------------------------- */
 
-test('a member may remove their own recent tag', async () => {
+test('a member may remove their own tag', async () => {
   await reset();
   await setDoc(doc(asAsha(), 'tags', 'MH12AB1234'), tagPayload('asha', 'Asha', 'MH12AB1234'));
   await assertSucceeds(deleteDoc(doc(asAsha(), 'tags', 'MH12AB1234')));
 });
 
-test('a member may not remove someone elses tag', async () => {
-  await reset();
-  await setDoc(doc(asAsha(), 'tags', 'MH12AB1234'), tagPayload('asha', 'Asha', 'MH12AB1234'));
-  await setDoc(doc(asBala(), 'members', 'bala'), {
-    name: 'Bala', code: JOIN_CODE, admin: false, createdAt: new Date(),
-  });
-  await assertFails(deleteDoc(doc(asBala(), 'tags', 'MH12AB1234')));
-});
-
-test('a member may not remove their own tag after the undo window', async () => {
-  await reset();
-  await testEnv.withSecurityRulesDisabled(async (context) => {
-    const old = new Date(Date.now() - 48 * 60 * 60 * 1000);
-    await setDoc(doc(context.firestore(), 'tags', 'MH12AB1234'),
-      tagPayload('asha', 'Asha', 'MH12AB1234', { createdAt: old }));
-  });
-  await assertFails(deleteDoc(doc(asAsha(), 'tags', 'MH12AB1234')));
-});
-
-test('an admin may remove any tag, however old', async () => {
+test('any member may remove another members tag, however old', async () => {
+  // Friends fixing a mistake for each other is the common case, not an attack.
   await reset();
   await testEnv.withSecurityRulesDisabled(async (context) => {
     const old = new Date(Date.now() - 48 * 60 * 60 * 1000);
@@ -262,13 +244,19 @@ test('an admin may remove any tag, however old', async () => {
   await assertSucceeds(deleteDoc(doc(asRavi(), 'tags', 'MH12AB1234')));
 });
 
+test('someone outside the club still may not remove a tag', async () => {
+  await reset();
+  await setDoc(doc(asAsha(), 'tags', 'MH12AB1234'), tagPayload('asha', 'Asha', 'MH12AB1234'));
+  // Bala is signed in anonymously but has never joined.
+  await assertFails(deleteDoc(doc(asBala(), 'tags', 'MH12AB1234')));
+  await assertFails(deleteDoc(doc(asStranger(), 'tags', 'MH12AB1234')));
+});
+
 test('a removed tag frees the bike to be tagged again', async () => {
   await reset();
   await setDoc(doc(asAsha(), 'tags', 'MH12AB1234'), tagPayload('asha', 'Asha', 'MH12AB1234'));
   await deleteDoc(doc(asAsha(), 'tags', 'MH12AB1234'));
-  await setDoc(doc(asBala(), 'members', 'bala'), {
-    name: 'Bala', code: JOIN_CODE, admin: false, createdAt: new Date(),
-  });
+  await setDoc(doc(asBala(), 'members', 'bala'), joinPayload('Bala'));
   await assertSucceeds(setDoc(
     doc(asBala(), 'tags', 'MH12AB1234'),
     tagPayload('bala', 'Bala', 'MH12AB1234'),

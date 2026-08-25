@@ -153,12 +153,9 @@ export const restBackend = {
     }
   },
 
+  /** Friends fixing each other's mistakes: any member may remove any tag. */
   canUntag(tag) {
-    const me = session.member;
-    if (!me || !tag || !tag.id) return false;
-    if (me.admin) return true;
-    return tag.taggedById === me.id
-      && Date.now() - Date.parse(tag.createdAt) < 24 * 60 * 60 * 1000;
+    return Boolean(session.member && tag && tag.id);
   },
 
   async feed(options) {

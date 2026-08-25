@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 // Configuration is read when the modules load, so the environment is set first.
 process.env.DB_FILE = ':memory:';
 process.env.JOIN_CODE = 'RIDE01';
-process.env.ADMIN_CODE = 'BOSS99';
 process.env.JWT_SECRET = 'test-secret-not-used-anywhere-real';
 process.env.CLUB_NAME = 'Test Riders';
 
@@ -46,7 +45,7 @@ async function signIn(name, deviceId, code = 'RIDE01') {
 
 let asha;
 let bala;
-let admin;
+let ravi;
 
 test('the service reports health without a token', async () => {
   const response = await call('/api/health');
@@ -66,8 +65,8 @@ test('a wrong join code is refused', async () => {
 test('the join code signs a member in', async () => {
   asha = await signIn('Asha', 'device-asha-0001');
   bala = await signIn('Bala', 'device-bala-0001');
-  admin = await signIn('Ravi', 'device-ravi-0001', 'BOSS99');
-  assert.ok(asha && bala && admin);
+  ravi = await signIn('Ravi', 'device-ravi-0001');
+  assert.ok(asha && bala && ravi);
 });
 
 test('protected routes reject anonymous callers', async () => {
@@ -163,11 +162,15 @@ test('the feed lists tags newest first and can be filtered to one member', async
   assert.ok(mine.body.tags.every((tag) => tag.taggedBy === 'Asha'));
 });
 
-test('stats count active tags and rank members', async () => {
+test('stats count active tags, rank members, and report your own total', async () => {
   const response = await call('/api/stats', { token: asha });
   assert.equal(response.body.total, 2);
   assert.equal(response.body.members, 3);
+  assert.equal(response.body.mine, 1, 'Asha has tagged one bike');
   assert.ok(response.body.leaderboard.some((row) => row.name === 'Asha'));
+
+  const balaView = await call('/api/stats', { token: bala });
+  assert.equal(balaView.body.mine, 1, 'each member sees their own total');
 });
 
 test('sync hands a phone every plate it needs to work offline', async () => {
@@ -184,13 +187,6 @@ test('sync since a timestamp returns only what changed after it', async () => {
   });
   assert.equal(response.body.full, false);
   assert.equal(response.body.plates.length, 0);
-});
-
-test('a member cannot remove someone elses tag', async () => {
-  const feed = await call('/api/tags?mine=1', { token: asha });
-  const ashasTag = feed.body.tags[0];
-  const response = await call(`/api/tags/${ashasTag.id}`, { method: 'DELETE', token: bala });
-  assert.equal(response.status, 403);
 });
 
 test('a member can undo their own tag, and the bike becomes taggable again', async () => {
@@ -211,24 +207,25 @@ test('a member can undo their own tag, and the bike becomes taggable again', asy
   assert.equal(retag.body.tag.taggedBy, 'Bala');
 });
 
-test('an admin can remove any tag', async () => {
-  const feed = await call('/api/tags', { token: admin });
-  const someTag = feed.body.tags[0];
-  const response = await call(`/api/tags/${someTag.id}`, { method: 'DELETE', token: admin });
+test('any member may remove a tag another member made', async () => {
+  // The club is a group of friends: fixing someone elses mistake while they are
+  // not around is the common case, not an attack.
+  const feed = await call('/api/tags', { token: ravi });
+  const someoneElsesTag = feed.body.tags.find((tag) => tag.taggedBy !== 'Ravi');
+  const response = await call(`/api/tags/${someoneElsesTag.id}`, {
+    method: 'DELETE', token: ravi,
+  });
   assert.equal(response.status, 200);
 });
 
-test('the export is admin only', async () => {
-  const denied = await call('/api/export.csv', { token: asha });
-  assert.equal(denied.status, 403);
-
-  const allowed = await call('/api/export.csv', { token: admin });
-  assert.equal(allowed.status, 200);
-  assert.match(String(allowed.body), /^id,plate,format,tagged_by/);
+test('any member can download the export', async () => {
+  const response = await call('/api/export.csv', { token: asha });
+  assert.equal(response.status, 200);
+  assert.match(String(response.body), /^id,plate,format,tagged_by/);
 });
 
 test('signing in again from the same device keeps one member record', async () => {
   await signIn('Asha K', 'device-asha-0001');
-  const response = await call('/api/stats', { token: admin });
+  const response = await call('/api/stats', { token: ravi });
   assert.equal(response.body.members, 3, 'a repeat sign-in must not create a second member');
 });

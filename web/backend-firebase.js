@@ -175,21 +175,16 @@ function restoreMember() {
 
 async function joinAs(uid, name, code) {
   const s = sdk;
-  const ref = s.doc(db, 'members', uid);
-
-  // The rules decide whether this code carries admin rights: the optimistic
-  // attempt succeeds only for the admin code, so no code check lives here.
-  for (const admin of [true, false]) {
-    try {
-      await s.setDoc(ref, {
-        name, code, admin, createdAt: s.serverTimestamp(),
-      });
-      return { id: uid, name, admin };
-    } catch (error) {
-      if (error.code !== 'permission-denied') throw error;
-    }
+  try {
+    await s.setDoc(s.doc(db, 'members', uid), {
+      name, code, createdAt: s.serverTimestamp(),
+    });
+    return { id: uid, name };
+  } catch (error) {
+    // The rules check the code, so a refusal here means the code was wrong.
+    if (error.code === 'permission-denied') throw new BackendError('bad_code');
+    throw new BackendError('offline');
   }
-  throw new BackendError('bad_code');
 }
 
 /* The interface app.js talks to ------------------------------------------- */
@@ -261,7 +256,7 @@ export const firebaseBackend = {
       if (data.name !== name) {
         await s.updateDoc(ref, { name });
       }
-      cacheMember({ id: user.uid, name, admin: Boolean(data.admin) });
+      cacheMember({ id: user.uid, name });
     } else {
       cacheMember(await joinAs(user.uid, name, code));
     }
@@ -364,11 +359,9 @@ export const firebaseBackend = {
     }
   },
 
+  /** Friends fixing each other's mistakes: any member may remove any tag. */
   canUntag(tag) {
-    if (!member || !tag) return false;
-    if (member.admin) return true;
-    return tag.taggedById === member.id
-      && Date.now() - Date.parse(tag.createdAt) < 24 * 60 * 60 * 1000;
+    return Boolean(member && tag);
   },
 
   async feed({ mine, before } = {}) {
@@ -392,14 +385,17 @@ export const firebaseBackend = {
     const today = new Date().toISOString().slice(0, 10);
     const byMember = new Map();
     let todayCount = 0;
+    let mine = 0;
 
     for (const tag of mirror.values()) {
       byMember.set(tag.taggedBy, (byMember.get(tag.taggedBy) || 0) + 1);
       if (tag.createdAt.startsWith(today)) todayCount += 1;
+      if (member && tag.taggedById === member.id) mine += 1;
     }
 
     return {
       total: mirror.size,
+      mine,
       today: todayCount,
       members: byMember.size,
       leaderboard: [...byMember.entries()]

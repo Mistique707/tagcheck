@@ -1,6 +1,6 @@
 {
   "name": "tagcheck",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "Scan a motorcycle number plate to check whether your club has already tagged that bike, then tag it if nobody has.",
   "type": "module",
   "private": false,

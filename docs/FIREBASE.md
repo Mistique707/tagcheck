@@ -76,19 +76,21 @@ exactly two documents.
 | `name` | string | `Night Owls MC` |
 | `joinUrl` | string | the link your paper signs point at (or leave empty) |
 
-**Document ID `secrets`** — the codes, readable by nobody:
+**Document ID `secrets`** — the club code, readable by nobody:
 
 | Field | Type | Value |
 |---|---|---|
-| `joinCode` | string | what members type to join, e.g. `RIDE01` |
-| `adminCode` | string | your own code, e.g. `BOSS99` |
+| `joinCode` | string | anything you like, e.g. `RIDE01` |
 
 > The rules deny every client read of `config/secrets`. The rules engine can
-> still consult it to check a code, which is how the codes are enforced without
-> a server. Do not paste them anywhere else.
+> still consult it to check a code, which is how joining is controlled without
+> a server.
 
-Pick codes that are easy to type and read out loud: uppercase letters and
-digits, avoiding `O`/`0` and `I`/`1`.
+**Nobody ever types this code.** It goes in the invite link you send out
+(step 7), so your friends only type their name. It exists so that a stranger
+who lands on the bare address cannot add junk to your list — and a junk tag is
+worse than it sounds, because it makes a real bike look already tagged and
+nobody hangs a card on it.
 
 ## 6. Deploy
 
@@ -113,17 +115,31 @@ npm run firebase:deploy
 It prints a **Hosting URL** like `https://night-owls-mc.web.app`. That address
 is the app.
 
-## 7. Get your members on it
+## 7. Send out the invite link
 
-Send them the Hosting URL and the join code. Each member:
+Take the Hosting URL and add your club code to the end of it, after `#join=`:
 
-1. Opens the link on their phone.
-2. Types their name and the club code.
+```
+https://night-owls-mc.web.app/#join=RIDE01
+```
+
+**That link is the whole onboarding.** Send it to the group chat. Each friend:
+
+1. Taps the link on their phone.
+2. Types their name. That is the only thing they ever type.
 3. Adds it to their home screen — Safari: **Share → Add to Home Screen**;
    Chrome: **menu → Install app**.
 
-To make yourself an admin, sign in with the **admin** code instead of the join
-code. Admins can remove anyone's tag and download the CSV export.
+The app takes the code out of the link, remembers it, and wipes it from the
+address bar so it is not sitting in a screenshot. From then on the phone opens
+straight into the scanner.
+
+Everyone who joins is equal: there are no admins. Any member can remove any
+tag — the usual reason is fixing someone else's mistake while they are not
+around — and anyone can download the CSV.
+
+> Keep the plain address (without `#join=...`) to yourself. Someone who opens
+> it cannot join, which is exactly the point.
 
 ---
 
@@ -131,7 +147,8 @@ code. Admins can remove anyone's tag and download the CSV export.
 
 On a real phone, not a laptop:
 
-- Sign in, press **Scan plate**, confirm the camera opens.
+- Open the invite link, type a name, press **Scan plate**, confirm the camera
+  opens.
 - Tag a bike, then check the same plate again — it should come back **Already
   tagged**.
 - Have a second person check that plate on their phone. They should see your
@@ -141,25 +158,30 @@ On a real phone, not a laptop:
 - Tag a bike in flight mode, then turn the network back on. It should send
   itself.
 
-## Changing the codes later
+## Changing the code later
 
-Edit `config/secrets` in the Firestore console. It takes effect immediately, and
-members who already joined stay joined. To remove someone entirely, delete their
+Edit `joinCode` in `config/secrets` in the Firestore console, then send out a
+fresh invite link with the new code. It takes effect immediately, and members
+who already joined stay joined. To remove someone entirely, delete their
 document from the `members` collection.
 
 ## Keeping a copy of the data
 
-Admins can download everything as CSV from **Totals → Download CSV** in the app.
-Do that after a big drive; it is the simplest backup there is.
+Any member can download everything as CSV from **Totals → Download the list as
+CSV**. Do that after a big drive; it is the simplest backup there is.
 
 ## If something goes wrong
 
 **"This club is not set up yet: anonymous sign-in is off in Firebase."**
 Step 3 was missed or did not save.
 
-**"That club code is not right"** when the code is right.
-Check `config/secrets` exists with exactly those field names, all lowercase, and
-that the rules deployed — rerun `npm run firebase:rules`.
+**"This link is missing its club code."**
+The `#join=...` part was stripped — some chat apps do this. The member can open
+**I was given a code** on the sign-in screen and type it once instead.
+
+**"This invite link is not valid for this club."**
+The code in the link does not match `joinCode` in `config/secrets`. Check for a
+typo, and that the rules deployed — rerun `npm run firebase:rules`.
 
 **The club name shows as "TagCheck".**
 `config/public` is missing or misnamed.
@@ -193,3 +215,5 @@ Almost nothing that a member would notice, but two things worth knowing:
 - **The member count on Totals counts people who have tagged something**,
   because the rules deliberately stop one member from reading another member's
   record.
+- **Signing out gives that phone a new identity.** Past tags stay credited to
+  the old name. There is normally no reason to sign out at all.

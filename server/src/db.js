@@ -22,7 +22,6 @@ CREATE TABLE IF NOT EXISTS members (
   id          INTEGER PRIMARY KEY,
   name        TEXT    NOT NULL,
   device_id   TEXT    NOT NULL UNIQUE,
-  is_admin    INTEGER NOT NULL DEFAULT 0,
   created_at  TEXT    NOT NULL,
   last_seen   TEXT    NOT NULL
 );
@@ -75,7 +74,7 @@ export function closeDb() {
 
 const now = () => new Date().toISOString();
 
-export function upsertMember({ name, deviceId, isAdmin }) {
+export function upsertMember({ name, deviceId }) {
   const database = getDb();
   const existing = database
     .prepare('SELECT * FROM members WHERE device_id = ?')
@@ -83,16 +82,16 @@ export function upsertMember({ name, deviceId, isAdmin }) {
 
   if (existing) {
     database
-      .prepare('UPDATE members SET name = ?, is_admin = ?, last_seen = ? WHERE id = ?')
-      .run(name, isAdmin ? 1 : Number(existing.is_admin), now(), existing.id);
+      .prepare('UPDATE members SET name = ?, last_seen = ? WHERE id = ?')
+      .run(name, now(), existing.id);
     return database.prepare('SELECT * FROM members WHERE id = ?').get(existing.id);
   }
 
   const stamp = now();
   const info = database
-    .prepare(`INSERT INTO members (name, device_id, is_admin, created_at, last_seen)
-              VALUES (?, ?, ?, ?, ?)`)
-    .run(name, deviceId, isAdmin ? 1 : 0, stamp, stamp);
+    .prepare(`INSERT INTO members (name, device_id, created_at, last_seen)
+              VALUES (?, ?, ?, ?)`)
+    .run(name, deviceId, stamp, stamp);
   return database.prepare('SELECT * FROM members WHERE id = ?').get(info.lastInsertRowid);
 }
 
@@ -196,11 +195,16 @@ export function tagsChangedSince(since) {
     .all(since, since);
 }
 
-export function stats() {
+export function stats(memberId) {
   const database = getDb();
   const total = database
     .prepare('SELECT COUNT(*) AS n FROM tags WHERE removed_at IS NULL')
     .get().n;
+  const mine = memberId
+    ? database
+      .prepare('SELECT COUNT(*) AS n FROM tags WHERE removed_at IS NULL AND member_id = ?')
+      .get(memberId).n
+    : 0;
   const today = database
     .prepare(`SELECT COUNT(*) AS n FROM tags
               WHERE removed_at IS NULL AND created_at >= ?`)
@@ -212,7 +216,7 @@ export function stats() {
               WHERE t.removed_at IS NULL
               GROUP BY m.id ORDER BY tags DESC, m.name ASC LIMIT 20`)
     .all();
-  return { total, today, members, leaderboard };
+  return { total, mine, today, members, leaderboard };
 }
 
 export function allTagsForExport() {

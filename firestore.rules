@@ -2,14 +2,18 @@ rules_version = '2';
 
 // TagCheck security rules.
 //
-// These rules are the whole security model in the Firebase setup: there is no
-// server to check anything, so what is written here is what is enforced.
+// These rules are the whole security model: there is no server to check
+// anything, so what is written here is what is enforced.
 //
 // The important one is on /tags: create is allowed, update never is. Because a
 // tag document is keyed by the plate itself, a second person tagging the same
 // bike is attempting an update, and Firestore refuses it. That is the same
 // guarantee the self-hosted version gets from a unique index, and it holds even
 // when two phones write in the same instant.
+//
+// Everyone who joins is equal. The club is a group of friends, so any member
+// may remove any tag -- the common case is fixing someone else's mistake while
+// they are not around, and locking that down helps nobody.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -26,49 +30,38 @@ service cloud.firestore {
       return signedIn() && exists(memberPath());
     }
 
-    function isAdmin() {
-      return isMember() && get(memberPath()).data.admin == true;
-    }
-
     // Readable by the rules engine even though no client may read it.
-    function secrets() {
-      return get(/databases/$(database)/documents/config/secrets).data;
+    function joinCode() {
+      return get(/databases/$(database)/documents/config/secrets).data.joinCode;
     }
 
-    function knownCode(code) {
-      return code == secrets().joinCode || code == secrets().adminCode;
-    }
-
-    // The club name, shown before anyone signs in.
+    // The club name, shown before anyone joins.
     match /config/public {
       allow read: if true;
       allow write: if false;
     }
 
-    // The join and admin codes. No client may read these; only the rules above
-    // consult them. Change them from the Firebase console.
+    // The join code, which lives in the invite link rather than in anyone's
+    // head. No client may read this; only the rules above consult it.
     match /config/secrets {
       allow read, write: if false;
     }
 
     match /members/{uid} {
-      // Your own record, and admins can see everyone.
-      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      // Your own record only. Names are copied onto tags, so nothing here is
+      // needed to render the app.
+      allow read: if signedIn() && request.auth.uid == uid;
 
       allow create: if signedIn()
         && request.auth.uid == uid
         && request.resource.data.name is string
         && request.resource.data.name.size() >= 2
         && request.resource.data.name.size() <= 40
-        && knownCode(request.resource.data.code)
-        // Admin is granted only by presenting the admin code.
-        && (request.resource.data.admin == false
-            || request.resource.data.code == secrets().adminCode);
+        && request.resource.data.code == joinCode();
 
-      // A member may correct their own name, but cannot promote themselves.
+      // A member may correct their own name.
       allow update: if signedIn()
         && request.auth.uid == uid
-        && request.resource.data.admin == resource.data.admin
         && request.resource.data.code == resource.data.code
         && request.resource.data.name is string
         && request.resource.data.name.size() >= 2
@@ -97,13 +90,9 @@ service cloud.firestore {
       // A tag is a record of something that happened. It is never edited.
       allow update: if false;
 
-      // Removing a tag frees the bike to be tagged again, so it is limited to
-      // the member who made it (for a day) or an admin.
-      allow delete: if isMember() && (
-        isAdmin()
-        || (resource.data.memberUid == request.auth.uid
-            && request.time < resource.data.createdAt + duration.value(24, 'h'))
-      );
+      // Any member may remove a tag: the sign fell off, or it was a mistake.
+      // Removing one frees the bike to be tagged again.
+      allow delete: if isMember();
     }
 
     // Anything not named above is closed.

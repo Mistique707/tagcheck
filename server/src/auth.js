@@ -20,18 +20,16 @@ function tidyCode(code) {
   return String(code ?? '').replace(/\s+/g, '').toUpperCase();
 }
 
-/** Returns 'admin', 'member', or null when the code matches nothing. */
+/** True when the supplied code lets someone join the club. */
 export function checkCode(code) {
   const tidy = tidyCode(code);
-  if (!tidy) return null;
-  if (secretEquals(tidy, tidyCode(config.adminCode))) return 'admin';
-  if (secretEquals(tidy, tidyCode(config.joinCode))) return 'member';
-  return null;
+  if (!tidy) return false;
+  return secretEquals(tidy, tidyCode(config.joinCode));
 }
 
 export function issueToken(member) {
   return jwt.sign(
-    { name: member.name, admin: Boolean(member.is_admin) },
+    { name: member.name },
     config.jwtSecret,
     { subject: String(member.id), expiresIn: config.tokenTtl },
   );
@@ -54,10 +52,5 @@ export function requireMember(req, res, next) {
   if (!member) return res.status(401).json({ error: 'sign_in_required' });
 
   req.member = member;
-  return next();
-}
-
-export function requireAdmin(req, res, next) {
-  if (!req.member?.is_admin) return res.status(403).json({ error: 'admin_only' });
   return next();
 }

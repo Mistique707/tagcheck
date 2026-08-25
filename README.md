@@ -34,9 +34,17 @@ park with one hand free and one bar of signal.
 | 🔴 **Already tagged** | Who tagged it and when, plus their note. Tagging is blocked. |
 | 🟠 **Almost a match** | A plate one character away is already tagged, shown side by side. The member decides. |
 
-There is no app store, no install, no accounts. A member opens a link, types
-their name and the club code once, and adds the page to their home screen.
-It works on iPhone and Android from the same address.
+Plus one number they care about, on the scan screen: **how many they have
+tagged**, next to the club total.
+
+There is no app store, no accounts, no passwords. A member taps the invite link,
+types their name, and adds the page to their home screen. That is the entire
+onboarding — the club code rides in the link, so nobody types it. It works on
+iPhone and Android from the same address.
+
+Everyone who joins is equal. There are no admins: any member can remove any tag
+(usually to fix someone else's mistake while they are not around) and anyone can
+export the list.
 
 ## Where it runs
 
@@ -72,8 +80,8 @@ cd tagcheck && npm install && npm start
 ```
 
 The server prints a generated join code on first boot. Open
-`http://localhost:3000`, sign in with it, and press **Type it** to try a plate.
-Add sample data with `npm run seed`.
+`http://localhost:3000/#join=THATCODE`, type a name, and press **Type it** to
+try a plate. Add sample data with `npm run seed`.
 
 For a real drive, set your own codes so they survive restarts:
 
@@ -81,13 +89,19 @@ For a real drive, set your own codes so they survive restarts:
 cp .env.example .env
 ```
 
-Edit `CLUB_NAME`, `JOIN_CODE`, `ADMIN_CODE` and `JWT_SECRET`, then run
+Edit `CLUB_NAME`, `JOIN_CODE` and `JWT_SECRET`, then run
 `node --env-file=.env server/src/index.js`.
 
 ---
 
-Either way, onboarding a member is the same: send them the address and the join
-code. They type their name once and add the page to their home screen.
+Either way, onboarding a member is the same: send them one link with the club
+code on the end of it —
+
+```
+https://your-address/#join=YOURCODE
+```
+
+— and they type their name once and add the page to their home screen.
 
 ## Using it on a drive
 
@@ -167,14 +181,12 @@ Every setting is an environment variable; see [.env.example](.env.example).
 | Variable | Default | What it does |
 |---|---|---|
 | `CLUB_NAME` | `TagCheck` | Shown at the top of the app |
-| `JOIN_CODE` | generated | The code members type once to join |
-| `ADMIN_CODE` | generated | Also grants removing any tag and CSV export |
+| `JOIN_CODE` | generated | Goes in the invite link; nobody types it |
 | `JWT_SECRET` | generated | Signs member tokens; set it or restarts sign everyone out |
 | `DB_FILE` | `data/tagcheck.db` | SQLite file; put it on a volume in production |
 | `PORT` / `HOST` | `3000` / `0.0.0.0` | Where to listen |
 | `JOIN_URL` | – | The link your paper signs point at |
 | `CORS_ORIGIN` | – | Needed only when the app is hosted apart from the server |
-| `UNDO_WINDOW_MS` | `86400000` | How long a member may undo their own tag |
 | `TRUST_PROXY` | – | Set to `1` behind a proxy so rate limits see real addresses |
 
 Anything left unset that must not be guessable is generated at boot and printed
@@ -193,10 +205,10 @@ All routes except `/api/health`, `/api/club` and `/api/session` need
 | `GET` | `/api/plates/:plate` | **The check.** `free`, `tagged` or `similar` |
 | `POST` | `/api/tags` | Tag a bike. `409` if it is already tagged |
 | `GET` | `/api/tags` | Recent tags, `?mine=1`, `?before=<iso>` |
-| `DELETE` | `/api/tags/:id` | Undo (own tag, or admin) |
+| `DELETE` | `/api/tags/:id` | Remove a tag, freeing the bike |
 | `GET` | `/api/sync` | Delta feed for the offline mirror, `?since=<iso>` |
 | `GET` | `/api/stats` | Totals and leaderboard |
-| `GET` | `/api/export.csv` | Full export (admin) |
+| `GET` | `/api/export.csv` | Full export |
 
 ## Data and privacy
 
@@ -233,7 +245,7 @@ npm run test:rules
 ```
 
 25 more run the Firestore security rules against a local emulator — joining,
-admin promotion, tag immutability, the undo window, and the duplicate
+the code check, tag immutability, who may remove a tag, and the duplicate
 guarantee. Needs Java installed; CI runs them on every push.
 
 ```

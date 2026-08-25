@@ -4,6 +4,38 @@ All notable changes to this project are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-08-25
+
+Onboarding is now a link and a name. Nothing else.
+
+### Changed
+
+- **Members no longer type a club code.** It travels in the invite link
+  (`https://your-address/#join=YOURCODE`), is remembered on first open, and is
+  wiped from the address bar so it does not sit in a screenshot. A member types
+  their name once and starts tagging. The gate still exists — someone opening
+  the bare address cannot join — it is simply invisible to the people who
+  belong there.
+- **No more admins.** A club of friends does not need two tiers, and with
+  nobody typing codes there was no way to become one. Any member can now remove
+  any tag, which is what you want when the person who made the mistake is not
+  around, and anyone can download the CSV export.
+- **The undo window is gone.** A tag was previously removable by its author for
+  24 hours; now any member can remove any tag at any time.
+
+### Added
+
+- **Your own tally on the scan screen** — how many you have tagged, next to the
+  club total, updating live as tags land, including tags other members make
+  while your phone is open.
+- A hidden **"I was given a code"** fallback on the sign-in screen, for when a
+  chat app strips the `#join=...` off a shared link.
+
+### Removed
+
+- `ADMIN_CODE` and `UNDO_WINDOW_MS` settings, and the `is_admin` column. A
+  database from 1.x keeps working; the column is simply ignored.
+
 ## [1.1.0] - 2026-08-25
 
 Adds a way to run TagCheck with no server and no cost.
@@ -68,5 +100,6 @@ First working release: enough to run a real tagging drive.
   would rather not call a CDN.
 - Docker image, compose file, and CI across Node 22 and 24.
 
+[2.0.0]: https://github.com/Mistique707/tagcheck/releases/tag/v2.0.0
 [1.1.0]: https://github.com/Mistique707/tagcheck/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Mistique707/tagcheck/releases/tag/v1.0.0

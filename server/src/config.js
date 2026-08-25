@@ -32,10 +32,7 @@ export const config = {
   dbFile: process.env.DB_FILE || 'data/tagcheck.db',
   jwtSecret: fromEnv('JWT_SECRET', () => randomBytes(32).toString('hex')),
   joinCode: fromEnv('JOIN_CODE', memorableCode),
-  adminCode: fromEnv('ADMIN_CODE', memorableCode),
   tokenTtl: process.env.TOKEN_TTL || '180d',
-  /** How long a member may undo their own tag before only admins can. */
-  undoWindowMs: Number(process.env.UNDO_WINDOW_MS || 24 * 60 * 60 * 1000),
   corsOrigin: process.env.CORS_ORIGIN || '',
   trustProxy: process.env.TRUST_PROXY || '',
 };
@@ -57,6 +54,5 @@ function keyToField(key) {
   return {
     JWT_SECRET: 'jwtSecret',
     JOIN_CODE: 'joinCode',
-    ADMIN_CODE: 'adminCode',
   }[key];
 }

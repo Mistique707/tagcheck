@@ -23,7 +23,7 @@ const SAMPLES = [
   ['23BH1234AB', 'New plate series, white Meteor'],
 ];
 
-const members = MEMBERS.map((member) => upsertMember({ ...member, isAdmin: false }));
+const members = MEMBERS.map((member) => upsertMember(member));
 
 let added = 0;
 for (const [index, [plate, note]] of SAMPLES.entries()) {

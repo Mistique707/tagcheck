@@ -59,8 +59,7 @@ Render, Railway, Fly.io and similar. The shape is always the same:
 - **Node version:** 24 (22.5 is the minimum)
 - **Persistent disk:** mount it, then set `DB_FILE` to a path on it, e.g.
   `/data/tagcheck.db`
-- **Environment:** `CLUB_NAME`, `JOIN_CODE`, `ADMIN_CODE`, `JWT_SECRET`,
-  `TRUST_PROXY=1`
+- **Environment:** `CLUB_NAME`, `JOIN_CODE`, `JWT_SECRET`, `TRUST_PROXY=1`
 
 > **The disk is not optional.** On a platform with an ephemeral filesystem,
 > every deploy and every restart wipes the tag history, and the whole point of
@@ -78,8 +77,8 @@ Useful when you want the app on free static hosting and only a tiny API to run.
 3. Deploy the server somewhere with HTTPS (options 1 or 2).
 4. On the server, set `CORS_ORIGIN` to the Pages URL, for example
    `https://mistique707.github.io`.
-5. Members open the Pages URL, expand **Connect to a different server** on the
-   sign-in screen, and paste the server address once.
+5. Members open the Pages URL with `#join=YOURCODE` on the end, expand
+   **Connect to a different server**, and paste the server address once.
 
 The split costs one extra step during onboarding. If that matters more than
 free hosting, serve the app from the server itself and skip this.
@@ -96,7 +95,8 @@ curl -sf https://your-server/api/health
 
 Then, on an actual phone:
 
-- Open the address, sign in with the join code.
+- Open the invite link (the address with `#join=YOURCODE` on the end) and
+  type a name.
 - Add to home screen (Safari: Share → Add to Home Screen; Chrome: menu → Install).
 - Press **Scan plate** and confirm the camera opens.
 - Turn on flight mode and check that a lookup still answers from the copy on
