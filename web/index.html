@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#12151c">
+<meta name="description" content="Check whether a motorcycle has already been tagged before you tag it.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TagCheck">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icons/icon-180.png">
+<link rel="icon" href="./icons/icon-192.png">
+<link rel="stylesheet" href="./styles.css">
+<title>TagCheck</title>
+</head>
+<body>
+
+<!-- Sign in -------------------------------------------------------------- -->
+<section id="view-signin" class="view" hidden>
+  <div class="signin-card">
+    <h1 class="brand"><span class="brand-mark">TC</span> <span id="club-name">TagCheck</span></h1>
+    <p class="muted">Check before you tag, so no bike gets two signs.</p>
+    <form id="signin-form" autocomplete="on">
+      <label for="input-name">Your name</label>
+      <input id="input-name" name="name" type="text" required minlength="2" maxlength="40"
+             placeholder="e.g. Asha" autocomplete="name">
+
+      <label for="input-code">Club code</label>
+      <input id="input-code" name="code" type="text" required
+             placeholder="Ask whoever runs the drive" autocapitalize="characters"
+             autocomplete="one-time-code" spellcheck="false">
+
+      <details class="advanced">
+        <summary>Connect to a different server</summary>
+        <label for="input-server">Server address</label>
+        <input id="input-server" type="url" inputmode="url" placeholder="https://tagcheck.example.com"
+               spellcheck="false">
+        <p class="hint">Leave blank when the app is served by the club server itself.</p>
+      </details>
+
+      <p id="signin-error" class="error" role="alert" hidden></p>
+      <button class="btn btn-primary" type="submit">Start tagging</button>
+    </form>
+  </div>
+</section>
+
+<!-- Main app ------------------------------------------------------------- -->
+<section id="view-app" class="view" hidden>
+  <header class="topbar">
+    <div class="topbar-left">
+      <span class="brand-mark small">TC</span>
+      <strong id="topbar-club">TagCheck</strong>
+    </div>
+    <div class="topbar-right">
+      <span id="net-chip" class="chip" title="Connection status">online</span>
+      <button id="btn-menu" class="icon-btn" aria-label="Menu" aria-expanded="false">&#9776;</button>
+    </div>
+  </header>
+
+  <nav id="menu" class="menu" hidden>
+    <button data-nav="scan">Scan a plate</button>
+    <button data-nav="feed">Recent tags</button>
+    <button data-nav="stats">Totals</button>
+    <button id="btn-sync">Sync now</button>
+    <button id="btn-location" aria-pressed="false">Save location with tags: off</button>
+    <button id="btn-signout" class="danger">Sign out</button>
+  </nav>
+
+  <!-- Scan ------------------------------------------------------------- -->
+  <main id="panel-scan" class="panel">
+    <div id="camera-wrap" class="camera-wrap">
+      <video id="video" playsinline muted autoplay></video>
+      <div class="guide"><span class="guide-hint">Fill the box with the number plate</span></div>
+      <canvas id="frame" hidden></canvas>
+    </div>
+
+    <p id="camera-fallback" class="camera-fallback" hidden>
+      Camera not available here. Use a photo or type the plate instead.
+    </p>
+
+    <div id="ocr-status" class="ocr-status" hidden></div>
+
+    <div class="actions">
+      <button id="btn-capture" class="btn btn-primary big">Scan plate</button>
+      <div class="actions-row">
+        <label class="btn btn-ghost" for="input-photo">Use a photo</label>
+        <input id="input-photo" type="file" accept="image/*" capture="environment" hidden>
+        <button id="btn-manual" class="btn btn-ghost">Type it</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- Result ----------------------------------------------------------- -->
+  <div id="panel-result" class="panel sheet" hidden>
+    <button id="btn-close-result" class="sheet-close" aria-label="Close">&times;</button>
+
+    <div class="plate-display">
+      <input id="plate-input" class="plate-text" spellcheck="false" autocapitalize="characters"
+             aria-label="Number plate" maxlength="16">
+      <p id="plate-meta" class="muted small"></p>
+    </div>
+
+    <div id="verdict" class="verdict" role="status" aria-live="polite">
+      <p class="verdict-title"></p>
+      <p class="verdict-detail"></p>
+    </div>
+
+    <div id="similar-box" class="similar" hidden>
+      <p class="muted small">Already tagged, one character away:</p>
+      <ul id="similar-list"></ul>
+    </div>
+
+    <label id="note-row" for="note-input" class="note-row">
+      <span>Note (optional)</span>
+      <input id="note-input" type="text" maxlength="280"
+             placeholder="Bike and spot, e.g. red Duke outside the gym">
+    </label>
+
+    <div class="result-actions">
+      <button id="btn-tag" class="btn btn-primary big">Tag this bike</button>
+      <button id="btn-recheck" class="btn btn-ghost">Check again</button>
+      <button id="btn-untag" class="btn btn-ghost danger" hidden>Remove this tag</button>
+    </div>
+  </div>
+
+  <!-- Feed ------------------------------------------------------------- -->
+  <main id="panel-feed" class="panel" hidden>
+    <h2>Recent tags</h2>
+    <div class="segmented">
+      <button data-feed="all" class="active">Everyone</button>
+      <button data-feed="mine">Mine</button>
+    </div>
+    <ul id="feed-list" class="feed"></ul>
+    <button id="btn-feed-more" class="btn btn-ghost" hidden>Load more</button>
+  </main>
+
+  <!-- Stats ------------------------------------------------------------ -->
+  <main id="panel-stats" class="panel" hidden>
+    <h2>Totals</h2>
+    <div class="stat-grid">
+      <div class="stat"><span id="stat-total">0</span><small>bikes tagged</small></div>
+      <div class="stat"><span id="stat-today">0</span><small>today</small></div>
+      <div class="stat"><span id="stat-members">0</span><small>members</small></div>
+    </div>
+    <h3>Leaderboard</h3>
+    <ol id="leaderboard" class="leaderboard"></ol>
+    <p id="admin-tools" hidden>
+      <a id="link-export" class="btn btn-ghost" href="#">Download CSV</a>
+    </p>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</section>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
