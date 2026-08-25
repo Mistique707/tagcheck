@@ -4,6 +4,25 @@ All notable changes to this project are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2026-08-25
+
+### Fixed
+
+- **Deploys did not reach phones that already had the app.** `firebase.json`
+  listed a `no-cache` rule for `/sw.js` before a broad `**/*.@(js|css)` rule
+  that set an hour of caching, and later rules win — so the service worker
+  itself was cached. A stale worker then kept serving stale CSS and JavaScript
+  out of its own cache, which is why the 2.0.1 menu fix was live on the server
+  and still invisible on a phone. The fresh-content rules now come last.
+- The service worker filled its cache through the browser HTTP cache, so a
+  newly installed worker could copy an already-stale file and then serve that
+  copy for its whole life. It now fetches shell files with `cache: 'reload'`.
+
+### Added
+
+- The app checks for a new service worker on every launch and reloads once when
+  one takes over, so a fix reaches members without anyone clearing anything.
+
 ## [2.0.1] - 2026-08-25
 
 Two bugs found in real use, both worse than they looked.
@@ -139,6 +158,7 @@ First working release: enough to run a real tagging drive.
   would rather not call a CDN.
 - Docker image, compose file, and CI across Node 22 and 24.
 
+[2.0.2]: https://github.com/Mistique707/tagcheck/releases/tag/v2.0.2
 [2.0.1]: https://github.com/Mistique707/tagcheck/releases/tag/v2.0.1
 [2.0.0]: https://github.com/Mistique707/tagcheck/releases/tag/v2.0.0
 [1.1.0]: https://github.com/Mistique707/tagcheck/releases/tag/v1.1.0

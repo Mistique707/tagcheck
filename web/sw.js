@@ -6,7 +6,7 @@
  * its own mirror in IndexedDB, which is the copy it can reason about.
  */
 
-const VERSION = 'tagcheck-v2.0.1';
+const VERSION = 'tagcheck-v2.0.2';
 
 /** Resolved against the worker location so a subpath deployment still works. */
 const SHELL = [
@@ -31,8 +31,13 @@ const SHELL = [
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(VERSION);
-    // One bad entry must not sink the whole install.
-    await Promise.allSettled(SHELL.map((url) => cache.add(url)));
+    // `cache: 'reload'` bypasses the browser HTTP cache while filling ours.
+    // Without it a freshly installed worker can copy a stale file straight out
+    // of the HTTP cache and then serve that stale copy for its whole lifetime.
+    // One bad entry must not sink the whole install, hence allSettled.
+    await Promise.allSettled(
+      SHELL.map((url) => cache.add(new Request(url, { cache: 'reload' }))),
+    );
     await self.skipWaiting();
   })());
 });

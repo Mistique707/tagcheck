@@ -743,7 +743,19 @@ async function boot() {
   if (backend.mode === 'firebase' && el.serverFallback) el.serverFallback.hidden = true;
 
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
+    // Check for a new worker on every launch, and reload once when one takes
+    // over. Without this a phone keeps running whatever it installed first, and
+    // a fix that is live on the server never reaches the person who needs it.
+    navigator.serviceWorker.register('./sw.js')
+      .then((registration) => registration.update())
+      .catch(() => {});
+
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloading) return;
+      reloading = true;
+      location.reload();
+    });
   }
 
   await loadClub().catch(() => {});
