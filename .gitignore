@@ -1,0 +1,14 @@
+node_modules/
+data/
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.local
+web/vendor/
+.DS_Store
+Thumbs.db
+*.log
+.claude/
+.vscode/
+.idea/
