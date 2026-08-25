@@ -9,6 +9,5 @@ web/vendor/
 .DS_Store
 Thumbs.db
 *.log
-.claude/
 .vscode/
 .idea/

@@ -1,0 +1,54 @@
+name: Deploy app to GitHub Pages
+
+# Publishes the phone app only. It still needs a TagCheck server for the club
+# records: members enter its address once, under "Connect to a different
+# server" on the sign-in screen, and that server needs CORS_ORIGIN set to this
+# Pages URL.
+#
+# Run this by hand from the Actions tab after enabling Pages in repository
+# settings (Settings -> Pages -> Source: GitHub Actions).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+
+      - name: Assemble the site
+        run: |
+          npm run icons
+          mkdir -p site
+          cp -r web/. site/
+          # The browser imports the same normaliser the server uses.
+          mkdir -p site/shared
+          cp shared/plate.js site/shared/plate.js
+          # Pages serves this as a static site; no Jekyll processing wanted.
+          touch site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

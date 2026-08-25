@@ -1,0 +1,18 @@
+services:
+  tagcheck:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      CLUB_NAME: ${CLUB_NAME:-TagCheck}
+      JOIN_CODE: ${JOIN_CODE:-}
+      ADMIN_CODE: ${ADMIN_CODE:-}
+      JWT_SECRET: ${JWT_SECRET:-}
+      JOIN_URL: ${JOIN_URL:-}
+      TRUST_PROXY: ${TRUST_PROXY:-}
+    volumes:
+      - tagcheck-data:/app/data
+
+volumes:
+  tagcheck-data:
