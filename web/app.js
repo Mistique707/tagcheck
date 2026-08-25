@@ -10,10 +10,10 @@
  * know which one was chosen.
  */
 
-import { bestReading, formatPlate, normalizePlate } from './shared/plate.js';
+import { formatPlate, normalizePlate } from './shared/plate.js';
 import { SYNC_INTERVAL_MS } from './config.js';
 import { getBackend } from './backend.js';
-import { canvasFromImage, cropGuideRegion, readPlate, releaseEngine } from './ocr.js';
+import { canvasFromImage, cropGuideRegion, releaseEngine, scanPlate } from './ocr.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -252,15 +252,12 @@ async function scanFromCanvas(canvas) {
 
   try {
     ocrStatus('preparing the image');
-    const candidates = await readPlate(canvas, {
+    const { reading, sawText } = await scanPlate(canvas, {
       onStage: (stage) => ocrStatus(stage),
-      onProgress: (progress) => ocrStatus(`reading the characters (${Math.round(progress * 100)}%)`),
     });
-
-    const reading = bestReading(candidates);
     ocrStatus(null);
 
-    if (!reading) openResult('', { unread: true });
+    if (!reading) openResult('', { unread: true, sawText });
     else openResult(reading.plate, { reading });
   } catch {
     ocrStatus(null);
@@ -297,7 +294,7 @@ async function scanFromFile(file) {
 
 /* Result sheet ------------------------------------------------------------ */
 
-function openResult(plate, { reading, unread, focus } = {}) {
+function openResult(plate, { reading, unread, focus, sawText } = {}) {
   state.reading = reading || null;
   state.lookup = null;
   el.result.hidden = false;
@@ -307,7 +304,11 @@ function openResult(plate, { reading, unread, focus } = {}) {
   el.plateInput.value = plate ? formatPlate(plate) : '';
 
   if (unread) {
-    el.plateMeta.textContent = 'Could not read it. Type the plate and check.';
+    // Showing what the camera actually read turns a dead end into something a
+    // member can judge: bad angle, bad light, or the box was on the wrong bike.
+    el.plateMeta.textContent = sawText
+      ? `Could not make a plate of it. The camera read: ${sawText}`
+      : 'Could not read it. Type the plate and check.';
     setVerdict('busy', 'Nothing read yet', 'Enter the plate above, then check.');
     el.tag.disabled = true;
   } else if (reading) {
@@ -552,6 +553,7 @@ async function loadClub() {
 
 const SIGNIN_MESSAGES = {
   bad_code: 'This invite link is not valid for this club. Ask for a fresh one.',
+  club_not_set_up: 'This club has not been set up yet. Whoever created it still needs to add the club settings in Firebase.',
   no_code: 'This link is missing its club code. Ask whoever set it up to resend the invite link.',
   offline: 'Cannot reach the club records. Check your signal.',
   anonymous_auth_disabled: 'This club is not set up yet: anonymous sign-in is off in Firebase.',

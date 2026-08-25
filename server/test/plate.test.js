@@ -92,3 +92,19 @@ test('bestReading picks the plate out of surrounding OCR noise', () => {
 test('bestReading returns null when nothing looks like a plate', () => {
   assert.equal(bestReading(['...', 'no']), null);
 });
+
+test('a two-row motorcycle plate is read as one plate, not two halves', () => {
+  // How a two-row plate actually arrives from the camera: one block, one newline.
+  const best = bestReading(['MH 12\nAB 1234']);
+  assert.equal(best.plate, 'MH12AB1234');
+});
+
+test('a fragment never beats the whole plate it came from', () => {
+  const best = bestReading(['MH 12', 'AB 1234', 'MH 12\nAB 1234']);
+  assert.equal(best.plate, 'MH12AB1234');
+});
+
+test('separate rows offered as separate lines still resolve when joined', () => {
+  const best = bestReading(['KA 01', 'HA 9999', 'KA 01HA 9999']);
+  assert.equal(best.plate, 'KA01HA9999');
+});

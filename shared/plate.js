@@ -231,7 +231,11 @@ export function normalizePlate(raw) {
   if (parsed.format === 'standard' || parsed.format === 'bh') confidence = 0.75;
   if (parsed.strong) confidence = 0.95;
   if (corrected) confidence -= 0.15;
-  if (text.length < 6) confidence -= 0.1;
+  // Real plates run to eight characters or more. A short string can still parse
+  // -- "MH12" is technically a legal shape -- so it is discounted rather than
+  // rejected, which keeps a fragment from beating the whole plate it came from.
+  if (text.length < 6) confidence -= 0.25;
+  else if (text.length < 8) confidence -= 0.1;
 
   return {
     ok: true,
@@ -251,15 +255,24 @@ export function normalizePlate(raw) {
  */
 export function bestReading(lines) {
   let best = null;
+
+  const consider = (text) => {
+    const result = normalizePlate(text);
+    if (!result.ok) return;
+    const better = !best
+      || result.confidence > best.confidence
+      || (result.confidence === best.confidence && result.plate.length > best.plate.length);
+    if (better) best = result;
+  };
+
   for (const line of lines || []) {
-    for (const token of String(line).split(/\s{2,}|\n/)) {
-      const result = normalizePlate(token);
-      if (!result.ok) continue;
-      const better = !best
-        || result.confidence > best.confidence
-        || (result.confidence === best.confidence && result.plate.length > best.plate.length);
-      if (better) best = result;
-    }
+    const raw = String(line);
+    // A two-row motorcycle plate usually arrives as ONE block with a newline in
+    // the middle. Splitting on that newline leaves two halves, and a half like
+    // "MH 12" parses as a valid short plate all by itself -- so the whole block,
+    // joined back up, has to be a candidate in its own right or the halves win.
+    consider(raw);
+    for (const token of raw.split(/\s{2,}|\n/)) consider(token);
   }
   return best;
 }

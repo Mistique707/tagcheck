@@ -4,6 +4,45 @@ All notable changes to this project are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-08-25
+
+Two bugs found in real use, both worse than they looked.
+
+### Fixed
+
+- **The menu would not close.** Hiding an element sets the `hidden` attribute,
+  which the browser honours through a user-agent rule — and author CSS beats the
+  user agent regardless of specificity. `.menu { display: grid }` therefore kept
+  the menu on screen forever, and the same applied to every `.btn` the app tries
+  to hide, including **Remove this tag**. One `[hidden] { display: none }` rule
+  fixes the lot.
+- **Plate scanning never worked at all.** Three separate causes, found in this
+  order:
+  1. The check for a self-hosted OCR engine treated any `200` as success. Both
+     the Node server and Firebase Hosting rewrite unknown paths to `index.html`
+     for the single-page app, so the probe always "found" an engine and the
+     browser then refused to run an HTML page as JavaScript. The check now
+     requires a JavaScript content type.
+  2. The scanner was built for car plates: a wide 4:1.4 guide box and a
+     single-line page-segmentation mode. Indian motorcycle plates are usually
+     **two rows**, which cannot be read that way. The guide is now 2:1 and the
+     engine reads a block, falling back through other modes.
+  3. A two-row plate arrives as one block with a newline in it. `bestReading`
+     split on that newline and scored the halves, and a half like `MH 12` parses
+     as a valid short plate — so a fragment beat the whole plate. The joined
+     block is now a candidate in its own right, and short readings are
+     discounted.
+- The character whitelist passed to the recognition engine is gone. It reads
+  like an easy win but the LSTM engine handles it badly; junk is cheaper to
+  strip afterwards, which the normaliser already did.
+
+### Added
+
+- When a scan fails, the app now shows **what the camera actually read**, so a
+  bad angle or a misframed box is obvious instead of being a dead end.
+- Three tests covering two-row plates, so a fragment can never again outscore
+  the plate it came from.
+
 ## [2.0.0] - 2026-08-25
 
 Onboarding is now a link and a name. Nothing else.
@@ -100,6 +139,7 @@ First working release: enough to run a real tagging drive.
   would rather not call a CDN.
 - Docker image, compose file, and CI across Node 22 and 24.
 
+[2.0.1]: https://github.com/Mistique707/tagcheck/releases/tag/v2.0.1
 [2.0.0]: https://github.com/Mistique707/tagcheck/releases/tag/v2.0.0
 [1.1.0]: https://github.com/Mistique707/tagcheck/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Mistique707/tagcheck/releases/tag/v1.0.0

@@ -173,6 +173,24 @@ function restoreMember() {
   }
 }
 
+/**
+ * Whether this club has been set up at all.
+ *
+ * Setup creates config/public alongside the code in config/secrets, and
+ * config/public is deliberately world-readable, so its absence is a reliable
+ * signal that no club settings exist yet. Without this check, a club that was
+ * never configured looks identical to a wrong code, because the rules refuse
+ * both the same way.
+ */
+async function clubConfigExists() {
+  try {
+    const snap = await sdk.getDoc(sdk.doc(db, 'config', 'public'));
+    return snap.exists();
+  } catch {
+    return false;
+  }
+}
+
 async function joinAs(uid, name, code) {
   const s = sdk;
   try {
@@ -258,7 +276,16 @@ export const firebaseBackend = {
       }
       cacheMember({ id: user.uid, name });
     } else {
-      cacheMember(await joinAs(user.uid, name, code));
+      try {
+        cacheMember(await joinAs(user.uid, name, code));
+      } catch (error) {
+        // Tell the difference between a bad code and a club nobody finished
+        // setting up, because the fix is completely different.
+        if (error.code === 'bad_code' && !(await clubConfigExists())) {
+          throw new BackendError('club_not_set_up');
+        }
+        throw error;
+      }
     }
 
     startListening();

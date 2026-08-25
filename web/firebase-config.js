@@ -12,18 +12,18 @@
  *   Project settings -> General -> Your apps -> Web app -> SDK setup
  */
 
-export const firebaseConfig = null;
-
-/* Replace the line above with your own, for example:
-
 export const firebaseConfig = {
-  apiKey: 'AIzaSy...',
-  authDomain: 'night-owls-mc.firebaseapp.com',
-  projectId: 'night-owls-mc',
-  storageBucket: 'night-owls-mc.firebasestorage.app',
-  messagingSenderId: '123456789012',
-  appId: '1:123456789012:web:abc123def456',
+  apiKey: 'AIzaSyCqxC7ynlXS684ynRDVv9vIhOmlHysqj3k',
+  authDomain: 'tagcheck-adc9c.firebaseapp.com',
+  projectId: 'tagcheck-adc9c',
+  storageBucket: 'tagcheck-adc9c.firebasestorage.app',
+  messagingSenderId: '862349987743',
+  appId: '1:862349987743:web:33bbd2e323b0b9ca3737aa',
 };
+
+/* To go back to running against a TagCheck server instead, set this to null:
+
+export const firebaseConfig = null;
 
 */
 

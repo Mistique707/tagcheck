@@ -34,6 +34,15 @@
 
 * { box-sizing: border-box; }
 
+/*
+ * The browser hides [hidden] elements with a user-agent rule, and author CSS
+ * beats the user agent no matter the specificity. Any rule below that sets
+ * `display` -- .menu is grid, .btn is inline-flex -- would therefore keep an
+ * element on screen after JavaScript set element.hidden = true. This one line
+ * is what makes hiding actually hide.
+ */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   background: var(--bg);
@@ -206,12 +215,17 @@ input:focus-visible, button:focus-visible, summary:focus-visible {
 
 #video { width: 100%; height: 100%; object-fit: cover; display: block; }
 
-/* The guide is where we crop from, so what the rider frames is what we read. */
+/*
+ * The guide is where we crop from, so what the rider frames is what we read.
+ * 2:1 because an Indian motorcycle plate is usually two rows, not the wide
+ * single line a car carries. A car plate still fits inside, with margin.
+ * Kept in step with GUIDE in ocr.js.
+ */
 .guide {
   position: absolute;
   left: 8%; right: 8%; top: 50%;
   transform: translateY(-50%);
-  aspect-ratio: 4 / 1.4;
+  aspect-ratio: 2 / 1;
   border: 3px solid var(--accent);
   border-radius: 10px;
   box-shadow: 0 0 0 100vmax rgb(0 0 0 / 0.45);

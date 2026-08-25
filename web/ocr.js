@@ -5,12 +5,23 @@
  * cleaned up before any recognition happens: crop to what the member framed,
  * upscale, flatten to grey, stretch the contrast, then threshold. That work
  * matters more to the result than which engine runs afterwards.
+ *
+ * The important domain fact: an Indian motorcycle plate is usually TWO ROWS
+ * (state and district above, series and number below), not the single wide line
+ * a car carries. Everything here is shaped around that -- the guide box is
+ * roughly square, the engine is told it is reading a block rather than a line,
+ * and the rows are stitched back together before being parsed.
  */
 
 import { OCR_SOURCES, OCR_TIMEOUT_MS } from './config.js';
+import { bestReading } from './shared/plate.js';
 
-/** Guide-box geometry, kept in step with the .guide rule in styles.css. */
-const GUIDE = { inset: 0.08, aspect: 4 / 1.4 };
+/**
+ * Guide-box geometry, kept in step with the .guide rule in styles.css.
+ * 2:1 holds a two-row motorcycle plate snugly and still contains a wide
+ * single-row car plate with margin to spare.
+ */
+const GUIDE = { inset: 0.08, aspect: 2 };
 const TARGET_WIDTH = 1100;
 
 /**
@@ -129,6 +140,10 @@ function otsuThreshold(grey) {
  * Produce a hard black-and-white copy. Indian plates come in white-on-black,
  * black-on-white and black-on-yellow, so the copy is oriented to dark text on a
  * light background whichever way round the original was.
+ *
+ * The inversion is judged from the middle of the crop only. The edges of the
+ * guide box usually catch bumper, shadow and mudguard, and letting that darkness
+ * vote flips the whole image the wrong way round.
  */
 export function toBinary(source, grey) {
   const threshold = otsuThreshold(grey);
@@ -139,8 +154,18 @@ export function toBinary(source, grey) {
   const image = ctx.createImageData(canvas.width, canvas.height);
 
   let dark = 0;
-  for (const value of grey) if (value < threshold) dark += 1;
-  const invert = dark > grey.length * 0.55;
+  let counted = 0;
+  const yStart = Math.floor(canvas.height * 0.25);
+  const yEnd = Math.ceil(canvas.height * 0.75);
+  const xStart = Math.floor(canvas.width * 0.2);
+  const xEnd = Math.ceil(canvas.width * 0.8);
+  for (let y = yStart; y < yEnd; y += 1) {
+    for (let x = xStart; x < xEnd; x += 1) {
+      if (grey[y * canvas.width + x] < threshold) dark += 1;
+      counted += 1;
+    }
+  }
+  const invert = counted > 0 && dark > counted * 0.55;
 
   for (let g = 0, i = 0; g < grey.length; g += 1, i += 4) {
     let on = grey[g] > threshold;
@@ -157,8 +182,6 @@ export function toBinary(source, grey) {
 }
 
 /* Engines ----------------------------------------------------------------- */
-
-const WHITELIST = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 
 function loadScript(url) {
   return new Promise((resolve, reject) => {
@@ -192,7 +215,13 @@ async function getWorker(onProgress) {
     let source = OCR_SOURCES.cdn;
     try {
       const head = await fetch(OCR_SOURCES.local.script, { method: 'HEAD' });
-      if (head.ok) source = OCR_SOURCES.local;
+      // A 200 is not enough. Both the Node server and Firebase Hosting rewrite
+      // unknown paths to index.html for the single-page app, so a missing
+      // vendor file answers 200 with HTML -- and the browser then refuses to
+      // execute it. Only a real JavaScript content type means the self-hosted
+      // engine is actually there.
+      const type = head.headers.get('content-type') || '';
+      if (head.ok && /javascript|ecmascript/i.test(type)) source = OCR_SOURCES.local;
     } catch {
       // No self-hosted copy: the CDN it is.
     }
@@ -200,7 +229,7 @@ async function getWorker(onProgress) {
     await loadScript(source.script);
     if (!window.Tesseract) throw new Error('recognition engine unavailable');
 
-    const worker = await window.Tesseract.createWorker('eng', 1, {
+    return window.Tesseract.createWorker('eng', 1, {
       workerPath: source.workerPath,
       corePath: source.corePath,
       langPath: source.langPath,
@@ -208,13 +237,10 @@ async function getWorker(onProgress) {
         if (message.status === 'recognizing text' && onProgress) onProgress(message.progress);
       },
     });
-
-    await worker.setParameters({
-      tessedit_char_whitelist: WHITELIST,
-      // A plate is one line of text, so tell the engine not to hunt for layout.
-      tessedit_pageseg_mode: '7',
-    });
-    return worker;
+    // Deliberately no tessedit_char_whitelist here. It reads like an easy win --
+    // a plate is only letters and digits -- but the LSTM engine handles a
+    // whitelist badly and often returns nothing at all. Junk characters are
+    // cheaper to strip afterwards, which scrub() in shared/plate.js already does.
   })();
 
   try {
@@ -237,11 +263,25 @@ async function nativeRead(canvas) {
   }
 }
 
-async function engineRead(canvas, onProgress) {
-  const worker = await getWorker(onProgress);
-  const { data } = await worker.recognize(canvas);
-  const lines = (data.lines || []).map((line) => line.text);
-  return [data.text, ...lines].filter(Boolean);
+/**
+ * Every way the rows of a plate might be put back together.
+ *
+ * A two-row plate arrives as two separate lines, so neither line is a whole
+ * plate on its own. The joins are offered alongside the individual lines and
+ * scored together, which lets a single-row plate win on its own line and a
+ * two-row plate win on the join.
+ */
+function candidatesFrom(data) {
+  const lines = (data.lines || [])
+    .map((line) => String(line.text || '').trim())
+    .filter(Boolean);
+
+  const out = [String(data.text || ''), ...lines];
+  if (lines.length > 1) {
+    out.push(lines.join(''));
+    for (let i = 0; i + 1 < lines.length; i += 1) out.push(lines[i] + lines[i + 1]);
+  }
+  return out.filter(Boolean);
 }
 
 function withTimeout(promise, ms) {
@@ -252,29 +292,71 @@ function withTimeout(promise, ms) {
 }
 
 /**
- * Read a prepared canvas and return every candidate string found.
+ * Attempts in the order that usually pays off on a motorcycle plate.
  *
- * Both the thresholded and the plain grey copies are offered to the engine:
- * thresholding wins on dirty plates and loses on shiny embossed ones, and the
- * caller scores all the candidates together anyway.
+ * PSM 6 treats the crop as one uniform block of text, which is exactly what a
+ * two-row plate is. PSM 7 promises a single line and only helps on a wide
+ * car-style plate. PSM 11 hunts sparse text and occasionally rescues a plate
+ * that thresholding mangled.
  */
-export async function readPlate(canvas, { onProgress, onStage } = {}) {
+const ATTEMPTS = [
+  { image: 'binary', psm: '6' },
+  { image: 'grey', psm: '6' },
+  { image: 'binary', psm: '7' },
+  { image: 'grey', psm: '11' },
+];
+
+/** Good enough to stop early rather than spend another second per attempt. */
+const CONFIDENT = 0.75;
+
+/**
+ * Read a prepared canvas.
+ *
+ * @returns {{reading: object|null, candidates: string[], sawText: string}}
+ *   `sawText` is whatever the engine actually read, so a member who gets a bad
+ *   result can see why instead of staring at a blank box.
+ */
+export async function scanPlate(canvas, { onProgress, onStage } = {}) {
   const { canvas: greyCanvas, grey } = toGrayscale(canvas);
-  const binary = toBinary(greyCanvas, grey);
+  const images = { grey: greyCanvas, binary: toBinary(greyCanvas, grey) };
+
+  const candidates = [];
+  let best = null;
 
   if (onStage) onStage('looking at the plate');
-  const native = await nativeRead(binary);
-  const candidates = [...native];
+  candidates.push(...await nativeRead(images.binary));
+  best = bestReading(candidates);
 
-  if (onStage) onStage('reading the characters');
-  try {
-    candidates.push(...await withTimeout(engineRead(binary, onProgress), OCR_TIMEOUT_MS));
-    candidates.push(...await withTimeout(engineRead(greyCanvas, onProgress), OCR_TIMEOUT_MS));
-  } catch (error) {
-    if (!candidates.length) throw error;
+  if (!best || best.confidence < CONFIDENT) {
+    let worker;
+    try {
+      if (onStage) onStage('starting the reader');
+      worker = await getWorker(onProgress);
+    } catch {
+      return { reading: best, candidates, sawText: candidates.join(' ').trim() };
+    }
+
+    for (const [index, attempt] of ATTEMPTS.entries()) {
+      if (best && best.confidence >= CONFIDENT) break;
+      try {
+        if (onStage) onStage(`reading the characters (try ${index + 1})`);
+        await worker.setParameters({ tessedit_pageseg_mode: attempt.psm });
+        const { data } = await withTimeout(worker.recognize(images[attempt.image]), OCR_TIMEOUT_MS);
+        candidates.push(...candidatesFrom(data));
+        best = bestReading(candidates);
+      } catch {
+        // A failed attempt is not fatal; the next one may still land.
+      }
+    }
   }
 
-  return candidates;
+  const sawText = candidates
+    .map((line) => String(line).replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join(' / ')
+    .slice(0, 120);
+
+  return { reading: best, candidates, sawText };
 }
 
 /** Free the engine when the app goes to the background for a while. */
