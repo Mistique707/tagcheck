@@ -48,21 +48,51 @@ member, without anyone creating a password.
 3. Give it a nickname (`TagCheck`), do **not** tick Firebase Hosting, register.
 4. Copy the `firebaseConfig` object it shows you.
 
-Paste it into `web/firebase-config.js`, replacing the `null`:
+Save it as `firebase.config.json` in the project root, as plain JSON:
 
-```js
-export const firebaseConfig = {
-  apiKey: 'AIzaSy...',
-  authDomain: 'night-owls-mc.firebaseapp.com',
-  projectId: 'night-owls-mc',
-  storageBucket: 'night-owls-mc.firebasestorage.app',
-  messagingSenderId: '123456789012',
-  appId: '1:123456789012:web:abc123def456',
-};
+```json
+{
+  "apiKey": "AIzaSy...",
+  "authDomain": "night-owls-mc.firebaseapp.com",
+  "projectId": "night-owls-mc",
+  "storageBucket": "night-owls-mc.firebasestorage.app",
+  "messagingSenderId": "123456789012",
+  "appId": "1:123456789012:web:abc123def456"
+}
 ```
 
-These values are not secrets — a Firebase web config is public by design. What
-protects your records is `firestore.rules`, which you deploy in step 6.
+`npm run build:web` injects it into the deployed app. The file is git-ignored,
+so it never reaches your repository.
+
+**These values are not secrets.** A Firebase web config ships inside every page
+your app serves — it has to, for the app to work at all — and Google documents
+it as public. It is kept out of the repository only because GitHub secret
+scanning flags the `AIza…` pattern (the same shape is used for billable Google
+APIs where a key *does* matter), and an alert people learn to ignore is worse
+than no alert.
+
+What actually protects your records is `firestore.rules`, deployed in step 6,
+plus restricting the key to your own domains — see below.
+
+### Restrict the key to your own site
+
+This is the one genuinely useful security step, and it takes two minutes.
+
+1. Open [Google Cloud → Credentials](https://console.cloud.google.com/apis/credentials)
+   and pick your project.
+2. Under **API keys**, click the one Firebase created (usually *Browser key
+   (auto created by Firebase)*).
+3. Under **Application restrictions**, choose **Websites**, and add:
+   - `tagcheck-adc9c.web.app/*` (your Hosting URL)
+   - `tagcheck-adc9c.firebaseapp.com/*`
+   - `localhost/*` if you want to keep testing locally
+4. Save. It can take a few minutes to take effect.
+
+Without this the key is unrestricted, so anyone could use it to create
+anonymous accounts against your project. They still could not read or write a
+single tag — the rules stop that — but they could burn quota, and if you ever
+enable a billable Google API on the project, an unrestricted key is a real
+liability.
 
 ## 5. Add the club settings
 

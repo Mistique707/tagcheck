@@ -13,6 +13,9 @@ Thumbs.db
 .idea/
 
 # Firebase
+# Not secret (it ships in every page), but committing it trips secret
+# scanning on every push. Injected at build time by tools/build-web.mjs.
+firebase.config.json
 public/
 .firebase/
 .firebaserc

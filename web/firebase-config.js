@@ -12,20 +12,32 @@
  *   Project settings -> General -> Your apps -> Web app -> SDK setup
  */
 
-export const firebaseConfig = {
-  apiKey: 'AIzaSyCqxC7ynlXS684ynRDVv9vIhOmlHysqj3k',
-  authDomain: 'tagcheck-adc9c.firebaseapp.com',
-  projectId: 'tagcheck-adc9c',
-  storageBucket: 'tagcheck-adc9c.firebasestorage.app',
-  messagingSenderId: '862349987743',
-  appId: '1:862349987743:web:33bbd2e323b0b9ca3737aa',
-};
-
-/* To go back to running against a TagCheck server instead, set this to null:
-
 export const firebaseConfig = null;
 
-*/
+/*
+ * Leave the line above as null. `npm run build:web` replaces it with your real
+ * project settings, read from firebase.config.json in the repository root (or
+ * the FIREBASE_CONFIG environment variable, for CI).
+ *
+ * firebase.config.json is git-ignored. Not because the values are secret --
+ * a Firebase web config ships inside every deployed page and Google documents
+ * it as public -- but because committing it trips secret scanning on every
+ * push, and an alert people learn to ignore is worse than no alert.
+ *
+ * What actually protects your data is firestore.rules, plus restricting this
+ * key to your own domains in the Google Cloud console. See docs/FIREBASE.md.
+ *
+ * To create it, copy the config from the Firebase console:
+ *
+ *   {
+ *     "apiKey": "AIza...",
+ *     "authDomain": "your-project.firebaseapp.com",
+ *     "projectId": "your-project",
+ *     "storageBucket": "your-project.firebasestorage.app",
+ *     "messagingSenderId": "123456789012",
+ *     "appId": "1:123456789012:web:abc123"
+ *   }
+ */
 
 /** Pinned so an SDK release cannot change behaviour under a live drive. */
 export const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/12.18.0';

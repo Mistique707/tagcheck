@@ -6,7 +6,7 @@
  * its own mirror in IndexedDB, which is the copy it can reason about.
  */
 
-const VERSION = 'tagcheck-v2.0.2';
+const VERSION = 'tagcheck-v2.0.3';
 
 /** Resolved against the worker location so a subpath deployment still works. */
 const SHELL = [
