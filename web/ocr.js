@@ -15,6 +15,7 @@
 
 import { OCR_SOURCES, OCR_TIMEOUT_MS } from './config.js';
 import { bestReading } from './shared/plate.js';
+import { locatePlate } from './locate.js';
 
 /**
  * Guide-box geometry, kept in step with the .guide rule in styles.css.
@@ -181,6 +182,94 @@ export function toBinary(source, grey) {
   return canvas;
 }
 
+/**
+ * Sauvola thresholding: decide light-or-dark per pixel from its own
+ * neighbourhood rather than from one cutoff for the whole picture.
+ *
+ * This is what handles a real plate. Otsu picks a single brightness for the
+ * whole image, so a plate half in shadow loses the shaded half entirely, and a
+ * film of dust drags the whole picture toward grey. Judging each pixel against
+ * the local mean and spread keeps shaded characters and ignores even grime.
+ *
+ * Integral images make the local statistics cost the same regardless of window
+ * size, so the window can be large enough to span a character.
+ */
+export function toAdaptiveBinary(source, grey) {
+  const width = source.width;
+  const height = source.height;
+  const window = Math.max(7, Math.round(Math.min(width, height) / 6) | 1);
+  const radius = window >> 1;
+  const k = 0.28;
+  const R = 128;
+
+  // Integral images of value and value squared, with a zero row and column.
+  const stride = width + 1;
+  const sum = new Float64Array(stride * (height + 1));
+  const sumSq = new Float64Array(stride * (height + 1));
+  for (let y = 0; y < height; y += 1) {
+    let rowSum = 0;
+    let rowSumSq = 0;
+    for (let x = 0; x < width; x += 1) {
+      const value = grey[y * width + x];
+      rowSum += value;
+      rowSumSq += value * value;
+      sum[(y + 1) * stride + (x + 1)] = sum[y * stride + (x + 1)] + rowSum;
+      sumSq[(y + 1) * stride + (x + 1)] = sumSq[y * stride + (x + 1)] + rowSumSq;
+    }
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const image = ctx.createImageData(width, height);
+
+  // Which way round is the text? Judge from the middle, where the characters
+  // are, not the edges, which catch mudguard and shadow.
+  let darkInMiddle = 0;
+  let counted = 0;
+  for (let y = (height * 0.25) | 0; y < height * 0.75; y += 1) {
+    for (let x = (width * 0.2) | 0; x < width * 0.8; x += 1) {
+      if (grey[y * width + x] < 110) darkInMiddle += 1;
+      counted += 1;
+    }
+  }
+  const invert = counted > 0 && darkInMiddle > counted * 0.55;
+
+  for (let y = 0; y < height; y += 1) {
+    const y0 = Math.max(0, y - radius);
+    const y1 = Math.min(height - 1, y + radius);
+    for (let x = 0; x < width; x += 1) {
+      const x0 = Math.max(0, x - radius);
+      const x1 = Math.min(width - 1, x + radius);
+      const count = (x1 - x0 + 1) * (y1 - y0 + 1);
+
+      const a = (y1 + 1) * stride + (x1 + 1);
+      const b = y0 * stride + (x1 + 1);
+      const c = (y1 + 1) * stride + x0;
+      const d = y0 * stride + x0;
+
+      const total = sum[a] - sum[b] - sum[c] + sum[d];
+      const totalSq = sumSq[a] - sumSq[b] - sumSq[c] + sumSq[d];
+      const mean = total / count;
+      const stdDev = Math.sqrt(Math.max(0, totalSq / count - mean * mean));
+      const threshold = mean * (1 + k * (stdDev / R - 1));
+
+      let on = grey[y * width + x] > threshold;
+      if (invert) on = !on;
+      const value = on ? 255 : 0;
+      const i = (y * width + x) * 4;
+      image.data[i] = value;
+      image.data[i + 1] = value;
+      image.data[i + 2] = value;
+      image.data[i + 3] = 255;
+    }
+  }
+
+  ctx.putImageData(image, 0, 0);
+  return canvas;
+}
+
 /* Engines ----------------------------------------------------------------- */
 
 function loadScript(url) {
@@ -291,72 +380,175 @@ function withTimeout(promise, ms) {
   ]);
 }
 
-/**
- * Attempts in the order that usually pays off on a motorcycle plate.
- *
- * PSM 6 treats the crop as one uniform block of text, which is exactly what a
- * two-row plate is. PSM 7 promises a single line and only helps on a wide
- * car-style plate. PSM 11 hunts sparse text and occasionally rescues a plate
- * that thresholding mangled.
- */
-const ATTEMPTS = [
-  { image: 'binary', psm: '6' },
-  { image: 'grey', psm: '6' },
-  { image: 'binary', psm: '7' },
-  { image: 'grey', psm: '11' },
-];
+/** Build the preprocessed variants offered to the engine, best guess first. */
+function variantsOf(canvas, label) {
+  const { canvas: greyCanvas, grey } = toGrayscale(canvas);
+  return [
+    // Adaptive first: it is the one that survives shadow, glare and dust.
+    { name: `${label}-adaptive`, image: toAdaptiveBinary(greyCanvas, grey), psm: '6' },
+    { name: `${label}-otsu`, image: toBinary(greyCanvas, grey), psm: '6' },
+    { name: `${label}-grey`, image: greyCanvas, psm: '6' },
+    { name: `${label}-adaptive-line`, image: toAdaptiveBinary(greyCanvas, grey), psm: '7' },
+  ];
+}
 
-/** Good enough to stop early rather than spend another second per attempt. */
-const CONFIDENT = 0.75;
+/** Stop as soon as two independent variants agree on a strong plate. */
+const AGREEMENT_TO_STOP = 2;
+const CONFIDENT = 0.9;
 
 /**
  * Read a prepared canvas.
  *
- * @returns {{reading: object|null, candidates: string[], sawText: string}}
- *   `sawText` is whatever the engine actually read, so a member who gets a bad
- *   result can see why instead of staring at a blank box.
+ * Two things make this work on a real bike rather than a clean photo.
+ *
+ * First, the plate is located inside the frame before anything is read, so the
+ * engine is handed a plate rather than a plate surrounded by mudguard, road and
+ * shadow. That single step is worth more than every other trick here.
+ *
+ * Second, several preprocessings are read and the answers are **voted on**
+ * rather than taking the first plausible one. Different variants fail in
+ * different ways, but they tend to agree when they are right, so agreement is a
+ * better signal than any single confidence score.
+ *
+ * @returns {{reading: object|null, candidates: string[], sawText: string,
+ *   located: boolean, agreement: number}}
  */
-export async function scanPlate(canvas, { onProgress, onStage } = {}) {
-  const { canvas: greyCanvas, grey } = toGrayscale(canvas);
-  const images = { grey: greyCanvas, binary: toBinary(greyCanvas, grey) };
+export async function scanPlate(canvas, { onProgress, onStage, useLocator = true } = {}) {
+  if (onStage) onStage('finding the plate');
+  const located = useLocator ? locatePlate(canvas) : null;
+
+  // Read the located plate first. The whole frame stays as a fallback, because
+  // a plate that fills the guide box entirely gives detection nothing to find.
+  const attempts = located
+    ? [...variantsOf(located.canvas, 'plate'), ...variantsOf(canvas, 'frame').slice(0, 2)]
+    : variantsOf(canvas, 'frame');
 
   const candidates = [];
-  let best = null;
+  /** plate string -> { reading, weight, hits } */
+  const votes = new Map();
+
+  const castVote = (reading) => {
+    if (!reading) return;
+    const entry = votes.get(reading.plate)
+      || { reading, weight: 0, hits: 0 };
+    // Squared, so a confident reading is not out-voted by a pile of weak ones.
+    // Half a plate reads as a valid short plate and can otherwise win on volume
+    // simply because more variants were tried on the cropped region.
+    entry.weight += reading.confidence * reading.confidence;
+    entry.hits += 1;
+    if (reading.confidence > entry.reading.confidence) entry.reading = reading;
+    votes.set(reading.plate, entry);
+  };
+
+  const winner = () => {
+    let top = null;
+    for (const entry of votes.values()) {
+      if (!top || entry.weight > top.weight
+        || (entry.weight === top.weight && entry.reading.confidence > top.reading.confidence)) {
+        top = entry;
+      }
+    }
+    return top;
+  };
+
+  const settled = () => {
+    const top = winner();
+    return Boolean(top && top.hits >= AGREEMENT_TO_STOP && top.reading.confidence >= CONFIDENT);
+  };
 
   if (onStage) onStage('looking at the plate');
-  candidates.push(...await nativeRead(images.binary));
-  best = bestReading(candidates);
+  const native = await nativeRead(located ? located.canvas : canvas);
+  candidates.push(...native);
+  castVote(bestReading(native));
 
-  if (!best || best.confidence < CONFIDENT) {
+  if (!settled()) {
     let worker;
     try {
       if (onStage) onStage('starting the reader');
       worker = await getWorker(onProgress);
     } catch {
-      return { reading: best, candidates, sawText: candidates.join(' ').trim() };
+      const top = winner();
+      return {
+        reading: top ? top.reading : null,
+        candidates,
+        sawText: summarise(candidates),
+        located: Boolean(located),
+        agreement: top ? top.hits : 0,
+      };
     }
 
-    for (const [index, attempt] of ATTEMPTS.entries()) {
-      if (best && best.confidence >= CONFIDENT) break;
+    for (const [index, attempt] of attempts.entries()) {
+      if (settled()) break;
       try {
         if (onStage) onStage(`reading the characters (try ${index + 1})`);
         await worker.setParameters({ tessedit_pageseg_mode: attempt.psm });
-        const { data } = await withTimeout(worker.recognize(images[attempt.image]), OCR_TIMEOUT_MS);
-        candidates.push(...candidatesFrom(data));
-        best = bestReading(candidates);
+        const { data } = await withTimeout(worker.recognize(attempt.image), OCR_TIMEOUT_MS);
+        const found = candidatesFrom(data);
+        candidates.push(...found);
+        castVote(bestReading(found));
       } catch {
-        // A failed attempt is not fatal; the next one may still land.
+        // A failed variant is not fatal; the next one may still land.
       }
     }
   }
 
-  const sawText = candidates
+  let top = winner();
+  // Last resort: score every candidate seen, in case no single variant produced
+  // a clean reading but the pieces together do.
+  if (!top) {
+    const fallback = bestReading(candidates);
+    if (fallback) top = { reading: fallback, hits: 1, weight: fallback.confidence };
+  }
+
+  return {
+    reading: top ? top.reading : null,
+    candidates,
+    sawText: summarise(candidates),
+    located: Boolean(located),
+    agreement: top ? top.hits : 0,
+  };
+}
+
+function summarise(candidates) {
+  return candidates
     .map((line) => String(line).replace(/\s+/g, ' ').trim())
     .filter(Boolean)
     .join(' / ')
     .slice(0, 120);
+}
 
-  return { reading: best, candidates, sawText };
+/**
+ * Pick the sharpest of several frames.
+ *
+ * A phone held at arm's length beside a parked bike produces wildly different
+ * frames a tenth of a second apart: one is focused, the next is smeared by a
+ * hand movement. Grabbing a burst and keeping the crispest costs nothing and
+ * removes the single most common reason a scan fails.
+ */
+export function sharpest(canvases) {
+  let best = null;
+  for (const canvas of canvases) {
+    const { grey } = toGrayscale(canvas);
+    const width = canvas.width;
+    const height = canvas.height;
+    let sum = 0;
+    let sumSq = 0;
+    let count = 0;
+    // Variance of the Laplacian: high on crisp edges, low on a blurred frame.
+    for (let y = 1; y < height - 1; y += 2) {
+      for (let x = 1; x < width - 1; x += 2) {
+        const i = y * width + x;
+        const value = 4 * grey[i] - grey[i - 1] - grey[i + 1]
+          - grey[i - width] - grey[i + width];
+        sum += value;
+        sumSq += value * value;
+        count += 1;
+      }
+    }
+    const score = count ? sumSq / count - (sum / count) ** 2 : 0;
+    if (!best || score > best.score) best = { canvas, score };
+  }
+  return best ? best.canvas : canvases[0];
 }
 
 /** Free the engine when the app goes to the background for a while. */
