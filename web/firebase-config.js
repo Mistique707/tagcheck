@@ -14,6 +14,16 @@
 
 export const firebaseConfig = null;
 
+/**
+ * A SEPARATE, billable key for Google Cloud Vision, injected at build time from
+ * the "visionApiKey" field of firebase.config.json. Null means the app reads
+ * plates entirely on the device, as it did before.
+ *
+ * Unlike the Firebase config above, this key can cost money. Restrict it to the
+ * club domain and cap its daily quota -- docs/FIREBASE.md walks through both.
+ */
+export const VISION_API_KEY = null;
+
 /*
  * Leave the line above as null. `npm run build:web` replaces it with your real
  * project settings, read from firebase.config.json in the repository root (or

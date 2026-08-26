@@ -54,8 +54,13 @@ function injectFirebaseConfig() {
     }
   }
 
+  // The Vision key is billable and separate from the Firebase config, so it is
+  // lifted out and injected on its own line.
+  const visionKey = parsed.visionApiKey || '';
+  delete parsed.visionApiKey;
+
   const source = readFileSync(target, 'utf8');
-  const replaced = source.replace(
+  let replaced = source.replace(
     /export const firebaseConfig = null;/,
     `export const firebaseConfig = ${JSON.stringify(parsed, null, 2)};`,
   );
@@ -64,8 +69,18 @@ function injectFirebaseConfig() {
     process.exit(1);
   }
 
+  if (visionKey) {
+    replaced = replaced.replace(
+      /export const VISION_API_KEY = null;/,
+      `export const VISION_API_KEY = ${JSON.stringify(visionKey)};`,
+    );
+  }
+
   writeFileSync(target, replaced);
   console.log(`Injected Firebase config for project ${parsed.projectId}`);
+  console.log(visionKey
+    ? 'Cloud Vision key present: plates will be read by Vision, with on-device fallback.'
+    : 'No Cloud Vision key: plates will be read on the device only.');
 }
 
 rmSync(out, { recursive: true, force: true });

@@ -35,6 +35,8 @@ export function createApp() {
           // Firestore and anonymous auth, used only in the serverless setup.
           'https://firestore.googleapis.com', 'https://identitytoolkit.googleapis.com',
           'https://securetoken.googleapis.com',
+          // Cloud Vision, when a club has configured plate reading through it.
+          'https://vision.googleapis.com',
           'blob:', 'data:',
         ],
         imgSrc: ["'self'", 'data:', 'blob:'],

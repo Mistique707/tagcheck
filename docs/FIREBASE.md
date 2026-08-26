@@ -188,6 +188,86 @@ On a real phone, not a laptop:
 - Tag a bike in flight mode, then turn the network back on. It should send
   itself.
 
+## Better plate reading with Cloud Vision (optional)
+
+On-device recognition is a document scanner being asked to read a dirty metal
+plate at an angle. Measured with `tools/ocr-bench.js`, it gets **83%** on a
+perfectly framed plate and **30-45%** on a realistic one. Cloud Vision is
+trained on photographs of the world, which is the actual problem here.
+
+This is optional. Without it nothing changes, and no image ever leaves a phone.
+
+### What it costs, and what it changes
+
+Vision is free for the first **1,000 images a month**, then roughly **$1.50 per
+1,000**. Fifteen people would have to scan very hard to leave the free tier —
+but it does require **billing enabled**, which means a card on file.
+
+It also means the cropped guide box — not the whole camera frame — is sent to
+Google whenever the phone has signal. Nothing is sent offline, and typing a
+plate never sends anything. If that trade is wrong for your club, skip this.
+
+### 1. Enable billing and the API
+
+1. [Enable billing](https://console.cloud.google.com/billing) on the project.
+2. Enable the [Cloud Vision API](https://console.cloud.google.com/apis/library/vision.googleapis.com).
+
+### 2. Cap the quota. Do not skip this
+
+A key that can spend money is sitting in a public web page. Domain restriction
+helps but is not airtight, so put a hard ceiling underneath it:
+
+1. Open [Vision API → Quotas](https://console.cloud.google.com/apis/api/vision.googleapis.com/quotas).
+2. Set the per-day request quota to something your club cannot reach but an
+   abuser would hit at once — **500 a day** is generous for fifteen people.
+3. Add a [budget alert](https://console.cloud.google.com/billing/budgets) at a
+   small figure, say $5, so you hear about it either way.
+
+With that ceiling the worst case is around $20 in a month. **Without it there is
+no upper limit at all.**
+
+### 3. Make a separate, restricted key
+
+Do not reuse the Firebase key. In
+[Credentials](https://console.cloud.google.com/apis/credentials):
+
+1. **Create credentials → API key**, named something like `TagCheck Vision`.
+2. **Application restrictions → Websites**: `tagcheck-adc9c.web.app/*` and
+   `tagcheck-adc9c.firebaseapp.com/*`.
+3. **API restrictions → Restrict key →** Cloud Vision API, and nothing else.
+
+### 4. Add it and deploy
+
+One extra field in `firebase.config.json`:
+
+```json
+{
+  "apiKey": "AIza...",
+  "projectId": "your-project",
+  "visionApiKey": "AIza...the-vision-key..."
+}
+```
+
+```bash
+npm run firebase:deploy
+```
+
+The build prints which reader is active. Vision is tried first when there is
+signal; on-device recognition takes over if it fails, runs out of quota, or the
+phone is offline. Typing always works.
+
+### 5. Check that it actually helped
+
+Open the app, paste `tools/ocr-bench.js` into the browser console, then:
+
+```
+await ocrBench({ levels: [0.3, 0.6] })
+```
+
+Compare against the on-device figures above. If it has not clearly improved,
+take the key back out — there is no sense paying for something that is not
+better.
+
 ## Changing the code later
 
 Edit `joinCode` in `config/secrets` in the Firestore console, then send out a

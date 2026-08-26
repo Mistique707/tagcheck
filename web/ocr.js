@@ -15,6 +15,7 @@
 
 import { OCR_SOURCES, OCR_TIMEOUT_MS } from './config.js';
 import { bestReading } from './shared/plate.js';
+import { readWithVision, visionAvailable } from './vision.js';
 
 /**
  * Guide-box geometry, kept in step with the .guide rule in styles.css.
@@ -322,10 +323,28 @@ export async function scanPlate(canvas, { onProgress, onStage } = {}) {
 
   const candidates = [];
   let best = null;
+  let engine = 'device';
 
-  if (onStage) onStage('looking at the plate');
-  candidates.push(...await nativeRead(images.binary));
-  best = bestReading(candidates);
+  // Cloud Vision first when it is configured and there is signal. It is trained
+  // on photographs of the world rather than scanned pages, which is what a
+  // dusty plate at an angle actually is. Everything below still runs if it is
+  // not configured, fails, or the phone is offline.
+  if (visionAvailable() && navigator.onLine) {
+    if (onStage) onStage('reading the plate');
+    const vision = await readWithVision(canvas);
+    if (vision) {
+      candidates.push(...vision.candidates);
+      best = bestReading(vision.candidates);
+      if (best) engine = 'vision';
+    }
+  }
+
+  if (!best || best.confidence < CONFIDENT) {
+    if (onStage) onStage('looking at the plate');
+    candidates.push(...await nativeRead(images.binary));
+    const native = bestReading(candidates);
+    if (native && (!best || native.confidence > best.confidence)) best = native;
+  }
 
   if (!best || best.confidence < CONFIDENT) {
     let worker;
@@ -333,7 +352,9 @@ export async function scanPlate(canvas, { onProgress, onStage } = {}) {
       if (onStage) onStage('starting the reader');
       worker = await getWorker(onProgress);
     } catch {
-      return { reading: best, candidates, sawText: candidates.join(' ').trim() };
+      return {
+        reading: best, engine, candidates, sawText: summarise(candidates),
+      };
     }
 
     for (const [index, attempt] of ATTEMPTS.entries()) {
@@ -350,13 +371,16 @@ export async function scanPlate(canvas, { onProgress, onStage } = {}) {
     }
   }
 
-  const sawText = candidates
-    .map((line) => String(line).replace(/\s+/g, ' ').trim())
+  return {
+    reading: best, engine, candidates, sawText: summarise(candidates),
+  };
+}
+
+function summarise(candidates) {
+  return [...new Set(candidates.map((line) => String(line).replace(/\s+/g, ' ').trim()))]
     .filter(Boolean)
     .join(' / ')
     .slice(0, 120);
-
-  return { reading: best, candidates, sawText };
 }
 
 /** Free the engine when the app goes to the background for a while. */

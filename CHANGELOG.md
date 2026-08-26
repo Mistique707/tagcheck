@@ -4,6 +4,36 @@ All notable changes to this project are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-08-25
+
+Plate reading was not good enough for a real car park. This measures the gap and
+offers a way to close it.
+
+### Added
+
+- **A realistic benchmark** (`tools/ocr-bench.js`). It renders plates with dust,
+  shadow, glare, blur, sensor noise and 3D tilt, sitting small inside a
+  cluttered frame, and reports exact-match accuracy. Every accuracy claim in
+  this project now comes from it. On-device recognition measures **83%** on a
+  perfectly framed plate but **30-45%** on a realistic one, which is the gap
+  between the earlier tests and how it behaved in the field.
+- **Optional Google Cloud Vision** as the primary reader, with on-device
+  recognition as the fallback and typing always available. Off unless a
+  `visionApiKey` is configured, so nothing changes for anyone who does not want
+  it. Only the cropped guide box is sent, only when online.
+- Setup instructions that treat a **daily quota cap as required**, not advisory:
+  a billable key in a public web page needs a hard ceiling under it, or the
+  worst case has no upper bound.
+
+### Notes
+
+Plate localisation, Sauvola adaptive thresholding and confidence-weighted voting
+across preprocessing variants were built and measured, and are **not** in this
+release: 8/20 with them, 8/20 without, against a 9/20 baseline — identical
+misses on the harder set. The bottleneck is the recognition engine, not the
+pixels fed to it. The work is kept on the `ocr-classical-cv-experiment` branch
+rather than shipped, since it would have made every scan slower for no gain.
+
 ## [2.0.2] - 2026-08-25
 
 ### Fixed
@@ -158,6 +188,7 @@ First working release: enough to run a real tagging drive.
   would rather not call a CDN.
 - Docker image, compose file, and CI across Node 22 and 24.
 
+[2.1.0]: https://github.com/Mistique707/tagcheck/releases/tag/v2.1.0
 [2.0.2]: https://github.com/Mistique707/tagcheck/releases/tag/v2.0.2
 [2.0.1]: https://github.com/Mistique707/tagcheck/releases/tag/v2.0.1
 [2.0.0]: https://github.com/Mistique707/tagcheck/releases/tag/v2.0.0
