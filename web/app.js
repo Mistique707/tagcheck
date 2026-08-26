@@ -10,10 +10,12 @@
  * know which one was chosen.
  */
 
-import { formatPlate, normalizePlate } from './shared/plate.js';
+import { formatPlate, normalizePlate, usefulAlternatives } from './shared/plate.js';
 import { SYNC_INTERVAL_MS } from './config.js';
 import { getBackend } from './backend.js';
-import { canvasFromImage, cropGuideRegion, releaseEngine, scanPlate } from './ocr.js';
+import {
+  canvasFromImage, cropGuideRegion, releaseEngine, scanPlate, sharpest,
+} from './ocr.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -47,6 +49,8 @@ const el = {
   closeResult: $('btn-close-result'),
   plateInput: $('plate-input'),
   plateMeta: $('plate-meta'),
+  alternatives: $('alternatives'),
+  alternativeList: $('alternative-list'),
   verdict: $('verdict'),
   similarBox: $('similar-box'),
   similarList: $('similar-list'),
@@ -252,13 +256,13 @@ async function scanFromCanvas(canvas) {
 
   try {
     ocrStatus('preparing the image');
-    const { reading, sawText } = await scanPlate(canvas, {
+    const { reading, readings, sawText } = await scanPlate(canvas, {
       onStage: (stage) => ocrStatus(stage),
     });
     ocrStatus(null);
 
-    if (!reading) openResult('', { unread: true, sawText });
-    else openResult(reading.plate, { reading });
+    if (!reading) openResult('', { unread: true, sawText, readings });
+    else openResult(reading.plate, { reading, readings });
   } catch {
     ocrStatus(null);
     openResult('', { unread: true });
@@ -268,14 +272,26 @@ async function scanFromCanvas(canvas) {
   }
 }
 
+/**
+ * Grab a short burst rather than a single frame.
+ *
+ * Frames a tenth of a second apart differ enormously in a held hand: one is
+ * focused, the next is smeared. Taking three and keeping the sharpest costs
+ * about a third of a second and removes the commonest cause of a failed read.
+ */
 async function captureFromVideo() {
   const rect = el.cameraWrap.getBoundingClientRect();
-  const canvas = cropGuideRegion(el.video, rect.width, rect.height);
-  if (!canvas) {
+  const frames = [];
+  for (let i = 0; i < 3; i += 1) {
+    const frame = cropGuideRegion(el.video, rect.width, rect.height);
+    if (frame) frames.push(frame);
+    if (i < 2) await new Promise((resolve) => { setTimeout(resolve, 110); });
+  }
+  if (!frames.length) {
     toast('Camera is still warming up.');
     return;
   }
-  await scanFromCanvas(canvas);
+  await scanFromCanvas(sharpest(frames));
 }
 
 async function scanFromFile(file) {
@@ -294,7 +310,7 @@ async function scanFromFile(file) {
 
 /* Result sheet ------------------------------------------------------------ */
 
-function openResult(plate, { reading, unread, focus, sawText } = {}) {
+function openResult(plate, { reading, unread, focus, sawText, readings } = {}) {
   state.reading = reading || null;
   state.lookup = null;
   el.result.hidden = false;
@@ -302,6 +318,7 @@ function openResult(plate, { reading, unread, focus, sawText } = {}) {
   el.similarBox.hidden = true;
   el.untag.hidden = true;
   el.plateInput.value = plate ? formatPlate(plate) : '';
+  renderAlternatives(readings, plate);
 
   if (unread) {
     // Showing what the camera actually read turns a dead end into something a
@@ -328,6 +345,37 @@ function closeResult() {
   el.result.hidden = true;
   state.reading = null;
   state.lookup = null;
+  el.alternatives.hidden = true;
+}
+
+/**
+ * Offer the runners-up as one-tap corrections.
+ *
+ * Recognition gets a real plate exactly right about half the time, and no
+ * amount of preprocessing changed that. What does change the experience is
+ * that the right answer is usually in the top few readings -- so showing them
+ * turns a wrong result into a single touch rather than a retype.
+ */
+function renderAlternatives(readings, chosen) {
+  const others = usefulAlternatives(readings, chosen);
+  if (!others.length) {
+    el.alternatives.hidden = true;
+    return;
+  }
+
+  el.alternativeList.innerHTML = '';
+  for (const item of others) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = item.pretty || formatPlate(item.plate);
+    button.addEventListener('click', () => {
+      el.plateInput.value = formatPlate(item.plate);
+      el.alternatives.hidden = true;
+      lookupPlate(item.plate);
+    });
+    el.alternativeList.append(button);
+  }
+  el.alternatives.hidden = false;
 }
 
 function renderSimilar(similar) {

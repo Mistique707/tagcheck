@@ -4,6 +4,31 @@ All notable changes to this project are recorded here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-08-25
+
+Getting the most out of the recognition we already have, without any paid
+service. Nothing here sends anything anywhere, and none of it costs money.
+
+Recognition gets a real plate exactly right about half the time, and the
+measurements in 2.1.0 showed that no amount of preprocessing changes that. So
+this release stops trying to make the engine right and makes being wrong cheap.
+
+### Added
+
+- **A burst instead of a single frame.** Three frames are captured about a tenth
+  of a second apart and the sharpest is kept. Frames that close together differ
+  enormously in a held hand -- one focused, the next smeared by a movement -- and
+  hand shake is the commonest reason a read comes back as nonsense. Costs about
+  a third of a second.
+- **The runners-up, as one-tap corrections.** When recognition disagrees with
+  itself, the alternatives appear under the plate as buttons. The right answer is
+  usually among the top few readings even when it is not first, so a wrong result
+  becomes one touch instead of retyping ten characters.
+- `rankReadings` and `usefulAlternatives` in the shared normaliser, with tests.
+  Alternatives that are merely *pieces* of the chosen plate -- "MH 12" beside
+  "MH 12 AB 1234" -- are filtered out, because they are the same guess with bits
+  missing rather than a different guess, and offering them is noise.
+
 ## [2.1.0] - 2026-08-25
 
 Plate reading was not good enough for a real car park. This measures the gap and
@@ -188,6 +213,7 @@ First working release: enough to run a real tagging drive.
   would rather not call a CDN.
 - Docker image, compose file, and CI across Node 22 and 24.
 
+[2.2.0]: https://github.com/Mistique707/tagcheck/releases/tag/v2.2.0
 [2.1.0]: https://github.com/Mistique707/tagcheck/releases/tag/v2.1.0
 [2.0.2]: https://github.com/Mistique707/tagcheck/releases/tag/v2.0.2
 [2.0.1]: https://github.com/Mistique707/tagcheck/releases/tag/v2.0.1

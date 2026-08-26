@@ -253,16 +253,17 @@ export function normalizePlate(raw) {
  * Pick the most plate-like reading out of everything OCR returned.
  * Candidates are scored on format strength first, then on length.
  */
-export function bestReading(lines) {
-  let best = null;
+export function rankReadings(lines, limit = 3) {
+  /** canonical plate -> best reading seen for it */
+  const byPlate = new Map();
 
   const consider = (text) => {
     const result = normalizePlate(text);
     if (!result.ok) return;
-    const better = !best
-      || result.confidence > best.confidence
-      || (result.confidence === best.confidence && result.plate.length > best.plate.length);
-    if (better) best = result;
+    const previous = byPlate.get(result.plate);
+    if (!previous || result.confidence > previous.confidence) {
+      byPlate.set(result.plate, result);
+    }
   };
 
   for (const line of lines || []) {
@@ -274,5 +275,38 @@ export function bestReading(lines) {
     consider(raw);
     for (const token of raw.split(/\s{2,}|\n/)) consider(token);
   }
-  return best;
+
+  return [...byPlate.values()]
+    .sort((a, b) => b.confidence - a.confidence || b.plate.length - a.plate.length)
+    .slice(0, limit);
+}
+
+/**
+ * The runners-up worth showing a member, given the reading already on screen.
+ *
+ * Most of what recognition returns alongside the winner is a piece of the same
+ * plate -- "MH12" and "AB1234" beside "MH12AB1234". Offering those as choices
+ * is noise: they are not different guesses, they are the same guess with bits
+ * missing. A useful alternative disagrees about a character, not about how much
+ * of the plate was seen.
+ */
+export function usefulAlternatives(readings, chosen, limit = 3) {
+  const target = scrub(chosen || '');
+  return (readings || [])
+    .filter((reading) => reading.plate !== target)
+    .filter((reading) => !target
+      || !(target.includes(reading.plate) || reading.plate.includes(target)))
+    .filter((reading) => reading.confidence >= 0.5)
+    .slice(0, limit);
+}
+
+/**
+ * The single most likely plate, or null.
+ *
+ * Recognition is only right about half the time on a real plate, so the runners
+ * up matter: offering them for a tap turns a wrong answer into a correction
+ * that costs one touch instead of retyping the whole plate.
+ */
+export function bestReading(lines) {
+  return rankReadings(lines, 1)[0] || null;
 }

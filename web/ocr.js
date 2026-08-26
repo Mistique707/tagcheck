@@ -14,7 +14,7 @@
  */
 
 import { OCR_SOURCES, OCR_TIMEOUT_MS } from './config.js';
-import { bestReading } from './shared/plate.js';
+import { bestReading, rankReadings } from './shared/plate.js';
 import { readWithVision, visionAvailable } from './vision.js';
 
 /**
@@ -353,7 +353,11 @@ export async function scanPlate(canvas, { onProgress, onStage } = {}) {
       worker = await getWorker(onProgress);
     } catch {
       return {
-        reading: best, engine, candidates, sawText: summarise(candidates),
+        reading: best,
+        engine,
+        candidates,
+        readings: rankReadings(candidates, 3),
+        sawText: summarise(candidates),
       };
     }
 
@@ -372,8 +376,51 @@ export async function scanPlate(canvas, { onProgress, onStage } = {}) {
   }
 
   return {
-    reading: best, engine, candidates, sawText: summarise(candidates),
+    reading: best,
+    engine,
+    candidates,
+    // The runners-up. Recognition is right about half the time on a real plate,
+    // so offering the near misses for a tap is worth more than any extra
+    // preprocessing: a wrong answer becomes one touch instead of retyping.
+    readings: rankReadings(candidates, 3),
+    sawText: summarise(candidates),
   };
+}
+
+/**
+ * Pick the sharpest of several frames.
+ *
+ * A phone held at arm's length beside a parked bike gives wildly different
+ * frames a tenth of a second apart: one is focused, the next is smeared by a
+ * hand movement. Grabbing a burst and keeping the crispest costs nothing and
+ * removes the commonest reason a scan comes back as nonsense.
+ *
+ * Sharpness is the variance of the Laplacian -- high on crisp edges, low on a
+ * blurred frame. Sampling every other pixel is plenty and keeps it instant.
+ */
+export function sharpest(canvases) {
+  let best = null;
+  for (const canvas of canvases) {
+    const { grey } = toGrayscale(canvas);
+    const width = canvas.width;
+    const height = canvas.height;
+    let sum = 0;
+    let sumSq = 0;
+    let count = 0;
+    for (let y = 1; y < height - 1; y += 2) {
+      for (let x = 1; x < width - 1; x += 2) {
+        const i = y * width + x;
+        const value = 4 * grey[i] - grey[i - 1] - grey[i + 1]
+          - grey[i - width] - grey[i + width];
+        sum += value;
+        sumSq += value * value;
+        count += 1;
+      }
+    }
+    const score = count ? sumSq / count - (sum / count) ** 2 : 0;
+    if (!best || score > best.score) best = { canvas, score };
+  }
+  return best ? best.canvas : canvases[0];
 }
 
 function summarise(candidates) {

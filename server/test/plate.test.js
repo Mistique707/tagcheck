@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  bestReading, formatPlate, fuzzyKey, normalizePlate, scrub,
+  bestReading, formatPlate, fuzzyKey, normalizePlate, rankReadings,
+  scrub, usefulAlternatives,
 } from '../../shared/plate.js';
 
 test('scrub removes spacing, punctuation and plate furniture', () => {
@@ -107,4 +108,49 @@ test('a fragment never beats the whole plate it came from', () => {
 test('separate rows offered as separate lines still resolve when joined', () => {
   const best = bestReading(['KA 01', 'HA 9999', 'KA 01HA 9999']);
   assert.equal(best.plate, 'KA01HA9999');
+});
+
+test('runner-up readings are offered, best first, without duplicates', () => {
+  const ranked = rankReadings([
+    'MH 12 AB 1234',
+    'MH 12 AB 1284',
+    'MH 12 AB 1234',
+    'rubbish',
+  ]);
+  assert.ok(ranked.length >= 2, 'the alternatives are what make a wrong read cheap to fix');
+  assert.equal(ranked[0].plate, 'MH12AB1234');
+  assert.equal(new Set(ranked.map((r) => r.plate)).size, ranked.length, 'no repeats');
+  for (let i = 1; i < ranked.length; i += 1) {
+    assert.ok(ranked[i - 1].confidence >= ranked[i].confidence, 'best first');
+  }
+});
+
+test('ranking never returns more than asked for', () => {
+  const ranked = rankReadings(['MH12AB1234', 'KA01HA9999', 'TN09BC4455', 'UP16DK7702'], 2);
+  assert.equal(ranked.length, 2);
+});
+
+test('bestReading still agrees with the top of the ranking', () => {
+  const lines = ['MH 12\nAB 1234', 'MH 12'];
+  assert.equal(bestReading(lines).plate, rankReadings(lines)[0].plate);
+});
+
+test('fragments of the chosen plate are not offered as alternatives', () => {
+  // What recognition actually returns beside a winner: pieces of the same plate.
+  const ranked = rankReadings(['MH 12 AB 1234', 'MH 12', 'AB 1234']);
+  const offered = usefulAlternatives(ranked, 'MH12AB1234');
+  assert.equal(offered.length, 0, 'a piece of the plate is not a different guess');
+});
+
+test('a genuine disagreement IS offered', () => {
+  const ranked = rankReadings(['MH 12 AB 1234', 'MH 12 AB 1284']);
+  const offered = usefulAlternatives(ranked, 'MH12AB1234');
+  assert.equal(offered.length, 1);
+  assert.equal(offered[0].plate, 'MH12AB1284');
+});
+
+test('alternatives never include the plate already on screen', () => {
+  const ranked = rankReadings(['KA 01 HA 9999', 'KA 01 HA 9998']);
+  const offered = usefulAlternatives(ranked, 'KA01HA9999');
+  assert.ok(offered.every((r) => r.plate !== 'KA01HA9999'));
 });

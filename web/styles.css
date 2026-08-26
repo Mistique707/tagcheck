@@ -344,6 +344,32 @@ input:focus-visible, button:focus-visible, summary:focus-visible {
 .result-actions { display: grid; gap: 10px; }
 .result-actions .btn { width: 100%; }
 
+/* Alternative readings ---------------------------------------------------- */
+
+/*
+ * Recognition is right about half the time on a real plate, so the runners-up
+ * are shown as one-tap corrections. Fixing a wrong read should cost a touch,
+ * not a retype.
+ */
+.alternatives { margin: 0 0 14px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+
+.chips button {
+  min-height: 44px;
+  padding: 0 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.chips button:hover { border-color: var(--accent); }
+
 /* Feed and stats ---------------------------------------------------------- */
 .segmented { display: flex; gap: 6px; margin: 12px 0; }
 
